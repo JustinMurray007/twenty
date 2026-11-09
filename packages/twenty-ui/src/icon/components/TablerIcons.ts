@@ -189,6 +189,7 @@ export {
   IconFilePencil,
   IconFiles,
   IconFileText,
+  IconFileSpreadsheet,
   IconFileUpload,
   IconFileZip,
   IconFilter,

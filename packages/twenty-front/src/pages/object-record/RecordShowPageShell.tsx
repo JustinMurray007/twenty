@@ -19,6 +19,9 @@ import { useWorkspaceSurface } from '@/ui/layout/hooks/useWorkspaceSurface';
 import { useWorkspaceSurfaceScopedComponentInstanceId } from '@/ui/layout/hooks/useWorkspaceSurfaceScopedComponentInstanceId';
 import { PageCardLayout } from '@/ui/layout/page/components/PageCardLayout';
 import { useAtomStateValue } from '@/ui/utilities/state/jotai/hooks/useAtomStateValue';
+import { OpenProposalActionButton } from '@/object-record/record-show/components/OpenProposalActionButton';
+import { PrintWorkOrderActionButton } from '@/object-record/record-show/components/PrintWorkOrderActionButton';
+import { GenerateMaterialOrderActionButton } from '@/object-record/record-show/components/GenerateMaterialOrderActionButton';
 import { RecordShowPageHeader } from '~/pages/object-record/RecordShowPageHeader';
 import { RecordShowPageTitle } from '~/pages/object-record/RecordShowPageTitle';
 
@@ -97,6 +100,18 @@ export const RecordShowPageShell = ({
             >
               {!isInSidePanel && (
                 <>
+                  <OpenProposalActionButton
+                    objectNameSingular={objectNameSingular}
+                    recordId={objectRecordId}
+                  />
+                  <PrintWorkOrderActionButton
+                    objectNameSingular={objectNameSingular}
+                    recordId={objectRecordId}
+                  />
+                  <GenerateMaterialOrderActionButton
+                    objectNameSingular={objectNameSingular}
+                    recordId={objectRecordId}
+                  />
                   <RecordShowCommandMenu />
                   {headerActions}
                   {!isLayoutCustomizationModeEnabled && (

@@ -1,0 +1,67 @@
+/**
+ * Entry point alias for server.js
+ * Imports compiled microservice with ABC Supply dispatch webhook, Twilio SMS alerts,
+ * Twenty CRM sync, and Kitchen-Table Add-On / Upsell Grid engine.
+ */
+require('dotenv').config();
+const service = require('./dist/index.js');
+
+module.exports = {
+  ...service,
+  sendHomeownerTransferRescheduleNotice: service.sendHomeownerTransferRescheduleNotice,
+  sendCrewTransferRescheduleSms: service.sendCrewTransferRescheduleSms,
+  runDrivewayClearanceReminders: service.runDrivewayClearanceReminders,
+  runCompletedJobReviewChecks: service.runCompletedJobReviewChecks,
+  getOrCreatePortalToken: service.getOrCreatePortalToken,
+  sendJobSharePortalWelcomeSms: service.sendJobSharePortalWelcomeSms,
+  calculateHealthScore: service.calculateHealthScore,
+  calculateInsuranceFinancials: service.calculateInsuranceFinancials,
+  runDepreciationAgingChecks: service.runDepreciationAgingChecks,
+  recordQuickBooksReceivePayment: service.recordQuickBooksReceivePayment,
+  postQuickBooksDepreciationJournalEntry: service.postQuickBooksDepreciationJournalEntry,
+  findOrCreateQuickBooksCustomer: service.findOrCreateQuickBooksCustomer,
+  createQuickBooksInvoice: service.createQuickBooksInvoice,
+  recordQuickBooksStripeDepositPayment: service.recordQuickBooksStripeDepositPayment,
+  recordQuickBooksDepositWithFee: service.recordQuickBooksDepositWithFee,
+  getStripeFeeBreakdown: service.getStripeFeeBreakdown,
+  verifyQuickBooksWebhook: service.verifyQuickBooksWebhook,
+  getQuickBooksPayment: service.getQuickBooksPayment,
+  getQuickBooksInvoice: service.getQuickBooksInvoice,
+  seedSimulatedQuickBooksPayment: service.seedSimulatedQuickBooksPayment,
+  seedSimulatedQuickBooksInvoice: service.seedSimulatedQuickBooksInvoice,
+  revertOpportunityPaymentInTwenty: service.revertOpportunityPaymentInTwenty,
+  getQuickBooksRefundReceipt: service.getQuickBooksRefundReceipt,
+  seedSimulatedQuickBooksRefundReceipt: service.seedSimulatedQuickBooksRefundReceipt,
+  runNightlyQboReconciliation: service.runNightlyQboReconciliation,
+  getQuickBooksInvoicesBatch: service.getQuickBooksInvoicesBatch,
+  findOrCreateQuickBooksVendor: service.findOrCreateQuickBooksVendor,
+  seedSimulatedQuickBooksVendor: service.seedSimulatedQuickBooksVendor,
+  createQuickBooksVendorBill: service.createQuickBooksVendorBill,
+  getQuickBooksBill: service.getQuickBooksBill,
+  seedSimulatedQuickBooksBill: service.seedSimulatedQuickBooksBill,
+  resolveQboExpenseAccountForCategory: service.resolveQboExpenseAccountForCategory,
+  evaluateSubcontractor1099Compliance: service.evaluateSubcontractor1099Compliance,
+  calculateJobCostingAndCommission: service.calculateJobCostingAndCommission,
+  normalizeDigits: service.normalizeDigits,
+  findOpportunityByPhone: service.findOpportunityByPhone,
+  parseCrewStatusCommand: service.parseCrewStatusCommand,
+  findOpportunityByCrewPhone: service.findOpportunityByCrewPhone,
+  seedSimulatedWeatherForecast: service.seedSimulatedWeatherForecast,
+  evaluateWeatherRiskForRoofing: service.evaluateWeatherRiskForRoofing,
+  fetch48HourForecastForOpportunity: service.fetch48HourForecastForOpportunity,
+  sendHomeownerRainDelayNotice: service.sendHomeownerRainDelayNotice,
+  sendCrewRainDelaySms: service.sendCrewRainDelaySms,
+  executeWeatherRainDelayReschedule: service.executeWeatherRainDelayReschedule,
+  run48HourWeatherRadarChecks: service.run48HourWeatherRadarChecks,
+  appendChangeOrderLineToQuickBooksInvoice: service.appendChangeOrderLineToQuickBooksInvoice,
+  parseCrewDeckingCommand: service.parseCrewDeckingCommand,
+  calculateDeckingChangeOrderPricing: service.calculateDeckingChangeOrderPricing,
+  initiateDeckingChangeOrderRequest: service.initiateDeckingChangeOrderRequest,
+  approveDeckingChangeOrder: service.approveDeckingChangeOrder,
+  resolveManufacturerWarrantyProgram: service.resolveManufacturerWarrantyProgram,
+  evaluateWarrantyRegistrationEligibility: service.evaluateWarrantyRegistrationEligibility,
+  evaluatePermitInspectionCompliance: service.evaluatePermitInspectionCompliance,
+};
+
+
+

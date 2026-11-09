@@ -1,4 +1,5 @@
 import { RecordIndexCommandMenu } from '@/command-menu-item/components/RecordIndexCommandMenu';
+import { RecordIndexActions } from '@/object-record/record-index/components/RecordIndexActions';
 import { contextStoreCurrentViewIdComponentState } from '@/context-store/states/contextStoreCurrentViewIdComponentState';
 import { contextStoreNumberOfSelectedRecordsComponentState } from '@/context-store/states/contextStoreNumberOfSelectedRecordsComponentState';
 import { isLayoutCustomizationModeEnabledState } from '@/layout-customization/states/isLayoutCustomizationModeEnabledState';
@@ -54,6 +55,7 @@ export const RecordIndexPageHeader = () => {
         actionButton={
           isDefined(contextStoreCurrentViewId) ? (
             <>
+              <RecordIndexActions />
               <RecordIndexCommandMenu />
               {!isLayoutCustomizationModeEnabled &&
                 workspaceSurface.type === 'main' && <SidePanelToggleButton />}
