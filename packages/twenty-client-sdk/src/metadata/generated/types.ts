@@ -1071,6 +1071,9 @@ export default {
             "grantedIframeMediaPermissions": [
                 317
             ],
+            "grantedRoleId": [
+                548
+            ],
             "healthCheckLogicFunctionId": [
                 548
             ],

@@ -35,7 +35,6 @@ export class PermissionsMetadataMapsService {
       flatFieldMetadataMapsOrm,
       featureFlagsMap,
       rolesPermissions,
-      flatApplicationMaps,
       flatRowLevelPermissionPredicateMaps,
       flatRowLevelPermissionPredicateGroupMaps,
     } = await this.workspaceCacheService.getOrRecompute(workspaceId, [
@@ -43,7 +42,6 @@ export class PermissionsMetadataMapsService {
       'flatFieldMetadataMapsOrm',
       'featureFlagsMap',
       'rolesPermissions',
-      'flatApplicationMaps',
       'flatRowLevelPermissionPredicateMaps',
       'flatRowLevelPermissionPredicateGroupMaps',
     ]);
@@ -53,7 +51,6 @@ export class PermissionsMetadataMapsService {
       flatFieldMetadataMaps: flatFieldMetadataMapsOrm,
       featureFlagsMap,
       rolesPermissions,
-      flatApplicationMaps,
       flatRowLevelPermissionPredicateMaps,
       flatRowLevelPermissionPredicateGroupMaps,
     };

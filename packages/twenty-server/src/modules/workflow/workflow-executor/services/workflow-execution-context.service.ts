@@ -111,15 +111,22 @@ export class WorkflowExecutionContextService {
     workflowRun: WorkflowRunWorkspaceEntity,
     workspace: FlatWorkspace,
   ): Promise<WorkflowExecutionContext> {
-    const { flatApplicationMaps, flatWorkflowMaps } =
-      await this.workspaceCacheService.getOrRecompute(workspace.id, [
-        'flatApplicationMaps',
-        'flatWorkflowMaps',
-      ]);
+    const {
+      flatApplicationMaps,
+      flatWorkflowMaps,
+      flatRoleTargetByApplicationIdMaps,
+    } = await this.workspaceCacheService.getOrRecompute(workspace.id, [
+      'flatApplicationMaps',
+      'flatWorkflowMaps',
+      'flatRoleTargetByApplicationIdMaps',
+    ]);
 
     const application = resolveWorkflowRunApplicationOrThrow({
       applicationId: this.getRunApplicationId(workflowRun, flatWorkflowMaps),
       applicationsById: flatApplicationMaps.byId,
+      workspaceId: workspace.id,
+      workspaceCustomApplicationId: workspace.workspaceCustomApplicationId,
+      flatRoleTargetByApplicationIdMaps,
     });
 
     const isActingOnBehalfOfUser =

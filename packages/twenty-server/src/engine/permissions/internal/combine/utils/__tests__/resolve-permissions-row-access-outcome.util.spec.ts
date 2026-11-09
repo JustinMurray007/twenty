@@ -82,15 +82,6 @@ const resolveOutcome = ({
           objects: { [flatObjectMetadata.id]: readOnlyPermissions },
         },
       },
-      flatApplicationMaps: {
-        byId: {
-          [APPLICATION_ID]: {
-            id: APPLICATION_ID,
-            defaultRoleId: APPLICATION_ROLE_ID,
-            deletedAt: null,
-          },
-        },
-      },
       flatRowLevelPermissionPredicateMaps: createEmptyFlatEntityMaps(),
       flatRowLevelPermissionPredicateGroupMaps: createEmptyFlatEntityMaps(),
       featureFlagsMap: Object.fromEntries(

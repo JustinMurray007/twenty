@@ -162,7 +162,6 @@ const findGranted = ({
           objects: { [flatObjectMetadata.id]: fullAccess },
         },
       },
-      flatApplicationMaps: { byId: {} },
       flatRowLevelPermissionPredicateMaps: createEmptyFlatEntityMaps(),
       flatRowLevelPermissionPredicateGroupMaps: createEmptyFlatEntityMaps(),
       featureFlagsMap: Object.fromEntries(
