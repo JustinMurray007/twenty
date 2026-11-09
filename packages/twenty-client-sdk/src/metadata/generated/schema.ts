@@ -2197,6 +2197,13 @@ export interface McpServerTool {
     __typename: 'McpServerTool'
 }
 
+export interface McpServerToolTestResult {
+    error?: Scalars['String']
+    result?: Scalars['JSON']
+    success: Scalars['Boolean']
+    __typename: 'McpServerToolTestResult'
+}
+
 export interface MessageCampaignBodyConfiguration {
     configurationType: WidgetConfigurationType
     __typename: 'MessageCampaignBodyConfiguration'
@@ -2579,6 +2586,7 @@ export interface Mutation {
     syncApplication: WorkspaceMigration
     syncMarketplaceCatalog: Scalars['Boolean']
     syncMcpServerTools: McpServer
+    testMcpServerTool: McpServerToolTestResult
     trackAnalytics: Analytics
     transferApplicationRegistrationOwnership: ApplicationRegistration
     triggerAddPeopleToMessageListJob: TriggerAddPeopleToMessageListJobResult
@@ -6939,6 +6947,14 @@ export interface McpServerToolGenqlSelection{
     __scalar?: boolean | number
 }
 
+export interface McpServerToolTestResultGenqlSelection{
+    error?: boolean | number
+    result?: boolean | number
+    success?: boolean | number
+    __typename?: boolean | number
+    __scalar?: boolean | number
+}
+
 export interface MessageCampaignBodyConfigurationGenqlSelection{
     configurationType?: boolean | number
     __typename?: boolean | number
@@ -7305,6 +7321,7 @@ export interface MutationGenqlSelection{
     syncApplication?: (WorkspaceMigrationGenqlSelection & { __args: {dryRun?: (Scalars['Boolean'] | null), inferDeletionFromMissingEntities?: (Scalars['Boolean'] | null), manifest: Scalars['JSON']} })
     syncMarketplaceCatalog?: boolean | number
     syncMcpServerTools?: (McpServerGenqlSelection & { __args: {id: Scalars['UUID']} })
+    testMcpServerTool?: (McpServerToolTestResultGenqlSelection & { __args: {input: TestMcpServerToolInput} })
     trackAnalytics?: (AnalyticsGenqlSelection & { __args: {event?: (Scalars['String'] | null), name?: (Scalars['String'] | null), properties?: (Scalars['JSON'] | null), type: AnalyticsType} })
     transferApplicationRegistrationOwnership?: (ApplicationRegistrationGenqlSelection & { __args: {applicationRegistrationId: Scalars['String'], targetWorkspaceSubdomain: Scalars['String']} })
     triggerAddPeopleToMessageListJob?: (TriggerAddPeopleToMessageListJobResultGenqlSelection & { __args: {input: TriggerAddPeopleToMessageListJobInput} })
@@ -8522,6 +8539,8 @@ export interface TasksConfigurationGenqlSelection{
     __typename?: boolean | number
     __scalar?: boolean | number
 }
+
+export interface TestMcpServerToolInput {mcpServerId: Scalars['UUID'],toolArguments?: (Scalars['JSON'] | null),toolName: Scalars['String']}
 
 export interface TimelineActivityTypeGenqlSelection{
     /** @deprecated Use emit.on */
@@ -11190,6 +11209,14 @@ export interface WorkspaceUrlsAndIdGenqlSelection{
     export const isMcpServerTool = (obj?: { __typename?: any } | null): obj is McpServerTool => {
       if (!obj?.__typename) throw new Error('__typename is missing in "isMcpServerTool"')
       return McpServerTool_possibleTypes.includes(obj.__typename)
+    }
+    
+
+
+    const McpServerToolTestResult_possibleTypes: string[] = ['McpServerToolTestResult']
+    export const isMcpServerToolTestResult = (obj?: { __typename?: any } | null): obj is McpServerToolTestResult => {
+      if (!obj?.__typename) throw new Error('__typename is missing in "isMcpServerToolTestResult"')
+      return McpServerToolTestResult_possibleTypes.includes(obj.__typename)
     }
     
 
