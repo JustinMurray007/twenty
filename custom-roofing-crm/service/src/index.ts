@@ -21521,6 +21521,837 @@ app.post('/api/service-tickets/:id/resolve', async (req: Request, res: Response)
 });
 
 // ==============================================================================
+// 6P. CALIFORNIA STATUTORY 20-DAY PRELIM & LIEN WAIVERS (§§ 8132-8138) (FEATURE #16)
+// ==============================================================================
+
+export interface CaliforniaStatutoryWaiverEvaluation {
+  waiverType: 'CONDITIONAL_PROGRESS' | 'UNCONDITIONAL_PROGRESS' | 'CONDITIONAL_FINAL' | 'UNCONDITIONAL_FINAL';
+  civilCodeSection: string;
+  statutoryTitle: string;
+  statutoryWarningBanner: string;
+  amount: number;
+  disputedAmount: number;
+  preliminaryNoticeDeadlineDate: string;
+  preliminaryNoticeServed: boolean;
+  preliminaryNoticeTimely: boolean;
+}
+
+export function evaluateCaliforniaStatutoryWaiverAndPrelim(input: {
+  waiverType?: string;
+  amount?: number;
+  disputedAmount?: number;
+  firstWorkDate?: string;
+  prelimServedAt?: string;
+}): CaliforniaStatutoryWaiverEvaluation {
+  const rawType = String(input?.waiverType || 'CONDITIONAL_PROGRESS').trim().toUpperCase();
+  let waiverType: CaliforniaStatutoryWaiverEvaluation['waiverType'] = 'CONDITIONAL_PROGRESS';
+  let civilCodeSection = 'CA Civil Code § 8132';
+  let statutoryTitle = 'CONDITIONAL WAIVER AND RELEASE ON PROGRESS PAYMENT';
+  let statutoryWarningBanner =
+    "NOTICE: THIS DOCUMENT WAIVES THE CLAIMANT'S LIEN, STOP PAYMENT NOTICE, AND PAYMENT BOND RIGHTS EFFECTIVE ON RECEIPT OF PAYMENT. A PERSON SHOULD NOT RELY ON THIS DOCUMENT UNLESS SATISFIED THAT THE CLAIMANT HAS RECEIVED PAYMENT.";
+
+  if (rawType === 'UNCONDITIONAL_PROGRESS') {
+    waiverType = 'UNCONDITIONAL_PROGRESS';
+    civilCodeSection = 'CA Civil Code § 8134';
+    statutoryTitle = 'UNCONDITIONAL WAIVER AND RELEASE ON PROGRESS PAYMENT';
+    statutoryWarningBanner =
+      'NOTICE TO CLAIMANT: THIS DOCUMENT WAIVES AND RELEASES LIEN, STOP PAYMENT NOTICE, AND PAYMENT BOND RIGHTS UNCONDITIONALLY AND STATES THAT YOU HAVE BEEN PAID FOR GIVING UP THOSE RIGHTS. THIS DOCUMENT IS ENFORCEABLE AGAINST YOU IF YOU SIGN IT, EVEN IF YOU HAVE NOT BEEN PAID.';
+  } else if (rawType === 'CONDITIONAL_FINAL') {
+    waiverType = 'CONDITIONAL_FINAL';
+    civilCodeSection = 'CA Civil Code § 8136';
+    statutoryTitle = 'CONDITIONAL WAIVER AND RELEASE ON FINAL PAYMENT';
+    statutoryWarningBanner =
+      "NOTICE: THIS DOCUMENT WAIVES THE CLAIMANT'S LIEN, STOP PAYMENT NOTICE, AND PAYMENT BOND RIGHTS EFFECTIVE ON RECEIPT OF PAYMENT. A PERSON SHOULD NOT RELY ON THIS DOCUMENT UNLESS SATISFIED THAT THE CLAIMANT HAS RECEIVED PAYMENT.";
+  } else if (rawType === 'UNCONDITIONAL_FINAL') {
+    waiverType = 'UNCONDITIONAL_FINAL';
+    civilCodeSection = 'CA Civil Code § 8138';
+    statutoryTitle = 'UNCONDITIONAL WAIVER AND RELEASE ON FINAL PAYMENT';
+    statutoryWarningBanner =
+      'NOTICE TO CLAIMANT: THIS DOCUMENT WAIVES AND RELEASES LIEN, STOP PAYMENT NOTICE, AND PAYMENT BOND RIGHTS UNCONDITIONALLY AND STATES THAT YOU HAVE BEEN PAID FOR GIVING UP THOSE RIGHTS. THIS DOCUMENT IS ENFORCEABLE AGAINST YOU IF YOU SIGN IT, EVEN IF YOU HAVE NOT BEEN PAID.';
+  }
+
+  const firstWorkMs = input?.firstWorkDate ? new Date(input.firstWorkDate).getTime() : Date.now();
+  const deadlineMs = firstWorkMs + 20 * 24 * 60 * 60 * 1000;
+  const preliminaryNoticeDeadlineDate = new Date(deadlineMs).toISOString().slice(0, 10);
+  const preliminaryNoticeServed = Boolean(input?.prelimServedAt);
+  const servedMs = input?.prelimServedAt ? new Date(input.prelimServedAt).getTime() : 0;
+  const preliminaryNoticeTimely = preliminaryNoticeServed && servedMs <= deadlineMs + 24 * 60 * 60 * 1000;
+
+  return {
+    waiverType,
+    civilCodeSection,
+    statutoryTitle,
+    statutoryWarningBanner,
+    amount: Math.round(Number(input?.amount ?? 0) * 100) / 100,
+    disputedAmount: Math.round(Number(input?.disputedAmount ?? 0) * 100) / 100,
+    preliminaryNoticeDeadlineDate,
+    preliminaryNoticeServed,
+    preliminaryNoticeTimely,
+  };
+}
+
+app.get('/api/legal/waivers/:id/status', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const opp = opportunityMemoryStore.get(oppId) || { id: oppId };
+  const evaluation = evaluateCaliforniaStatutoryWaiverAndPrelim({
+    waiverType: opp.statutoryWaiverType,
+    amount: opp.statutoryWaiverAmount,
+    disputedAmount: opp.statutoryWaiverDisputedAmount,
+    firstWorkDate: opp.preliminaryNoticeFirstWorkDate,
+    prelimServedAt: opp.preliminaryNoticeServedAt,
+  });
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    statutoryWaiverUrl: opp.statutoryWaiverUrl || null,
+    preliminaryNoticeCertMailTracking: opp.preliminaryNoticeCertMailTracking || null,
+    evaluation,
+  });
+});
+
+app.post('/api/legal/waivers/:id/serve-prelim', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const existing = opportunityMemoryStore.get(oppId) || { id: oppId };
+
+  const firstWorkDate = String(req.body?.firstWorkDate || new Date().toISOString().slice(0, 10)).trim();
+  const certMailTracking = String(req.body?.certMailTracking || `USPS-CERT-${Date.now().toString().slice(-8)}`).trim();
+  const servedAt = String(req.body?.servedAt || new Date().toISOString()).trim();
+
+  const evaluation = evaluateCaliforniaStatutoryWaiverAndPrelim({
+    waiverType: existing.statutoryWaiverType,
+    amount: existing.statutoryWaiverAmount,
+    firstWorkDate,
+    prelimServedAt: servedAt,
+  });
+
+  const updatedOpp = {
+    ...existing,
+    preliminaryNoticeFirstWorkDate: firstWorkDate,
+    preliminaryNoticeDeadlineDate: evaluation.preliminaryNoticeDeadlineDate,
+    preliminaryNoticeServedAt: servedAt,
+    preliminaryNoticeCertMailTracking: certMailTracking,
+  };
+  opportunityMemoryStore.set(oppId, updatedOpp);
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    firstWorkDate,
+    preliminaryNoticeDeadlineDate: evaluation.preliminaryNoticeDeadlineDate,
+    certMailTracking,
+    preliminaryNoticeTimely: evaluation.preliminaryNoticeTimely,
+    evaluation,
+    opportunity: updatedOpp,
+  });
+});
+
+app.post('/api/legal/waivers/:id/generate', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const existing = opportunityMemoryStore.get(oppId) || { id: oppId };
+
+  const evaluation = evaluateCaliforniaStatutoryWaiverAndPrelim({
+    waiverType: req.body?.waiverType || 'CONDITIONAL_PROGRESS',
+    amount: req.body?.amount ?? 12000,
+    disputedAmount: req.body?.disputedAmount ?? 0,
+    firstWorkDate: existing.preliminaryNoticeFirstWorkDate,
+    prelimServedAt: existing.preliminaryNoticeServedAt,
+  });
+
+  const throughDate = String(req.body?.throughDate || new Date().toISOString().slice(0, 10)).trim();
+  const waiverUrl = `${process.env.PUBLIC_BASE_URL || 'http://localhost:4000'}/legal/waivers/${oppId}/sheet`;
+
+  const updatedOpp = {
+    ...existing,
+    statutoryWaiverType: evaluation.waiverType,
+    statutoryWaiverSection: evaluation.civilCodeSection,
+    statutoryWaiverAmount: evaluation.amount,
+    statutoryWaiverThroughDate: throughDate,
+    statutoryWaiverDisputedAmount: evaluation.disputedAmount,
+    statutoryWaiverUrl: waiverUrl,
+    statutoryWaiverGeneratedAt: new Date().toISOString(),
+  };
+  opportunityMemoryStore.set(oppId, updatedOpp);
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    waiverUrl,
+    evaluation,
+    opportunity: updatedOpp,
+  });
+});
+
+app.get('/legal/waivers/:id/sheet', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const opp = opportunityMemoryStore.get(oppId);
+  if (!opp || !opp.statutoryWaiverType) {
+    return res.status(404).send('<h2>California Statutory Lien Waiver Not Found</h2>');
+  }
+
+  const evaluation = evaluateCaliforniaStatutoryWaiverAndPrelim({
+    waiverType: opp.statutoryWaiverType,
+    amount: opp.statutoryWaiverAmount,
+    disputedAmount: opp.statutoryWaiverDisputedAmount,
+    firstWorkDate: opp.preliminaryNoticeFirstWorkDate,
+    prelimServedAt: opp.preliminaryNoticeServedAt,
+  });
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>${evaluation.statutoryTitle} (${evaluation.civilCodeSection})</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8fafc; padding: 24px; color: #0f172a; }
+    .doc { max-width: 780px; margin: 0 auto; background: #fff; border: 3px solid #0f172a; padding: 28px; border-radius: 6px; }
+    .notice { background: #fef2f2; border: 2px solid #dc2626; padding: 14px; font-weight: 800; font-size: 13px; margin-bottom: 18px; }
+  </style>
+</head>
+<body>
+  <div class="doc">
+    <div style="font-size: 12px; font-weight: 800; color: #475569;">STATUTORY FORM — ${evaluation.civilCodeSection}</div>
+    <h1 style="font-size: 20px; margin: 6px 0 14px 0;">${evaluation.statutoryTitle}</h1>
+    <div class="notice">${evaluation.statutoryWarningBanner}</div>
+    <p><strong>Name of Claimant:</strong> San Diego Premier Roofing Inc. (CSLB #C39-1094821)</p>
+    <p><strong>Name of Customer:</strong> ${opp.customerName || 'Homeowner'}</p>
+    <p><strong>Job Location:</strong> ${opp.addressStreet || 'Job Site'}, ${opp.addressCity || 'San Diego'}, CA</p>
+    <p><strong>Through Date:</strong> ${opp.statutoryWaiverThroughDate || 'N/A'} • <strong>Amount of Check / Payment:</strong> $${evaluation.amount.toFixed(2)}</p>
+    <p><strong>Exceptions / Disputed Claims Amount:</strong> $${evaluation.disputedAmount.toFixed(2)}</p>
+  </div>
+</body>
+</html>`;
+
+  res.status(200).type('text/html').send(html);
+});
+
+// ==============================================================================
+// 6Q. CAL/OSHA 1926.501 DAILY FALL-PROTECTION & HEAT-ILLNESS LOG (FEATURE #17)
+// ==============================================================================
+
+export interface CalOshaSafetyEvaluation {
+  completedChecksCount: number;
+  totalChecksCount: number;
+  ambientTempF: number;
+  heatIllnessTriggerActive: boolean;
+  crewSignedCount: number;
+  competentPersonName: string;
+  clearedForTearOff: boolean;
+  checklist: {
+    oshaAnchorPointsInstalled: boolean;
+    oshaHarnessesInspected: boolean;
+    oshaLadderThreeFeetAboveEave: boolean;
+    oshaPerimeterCautionTapeSet: boolean;
+    oshaHeatIllnessWaterShadeVerified: boolean;
+  };
+  blockers: string[];
+}
+
+export function evaluateCalOshaJobSiteSafety(opp: any): CalOshaSafetyEvaluation {
+  const checklist = {
+    oshaAnchorPointsInstalled: Boolean(opp?.oshaAnchorPointsInstalled),
+    oshaHarnessesInspected: Boolean(opp?.oshaHarnessesInspected),
+    oshaLadderThreeFeetAboveEave: Boolean(opp?.oshaLadderThreeFeetAboveEave),
+    oshaPerimeterCautionTapeSet: Boolean(opp?.oshaPerimeterCautionTapeSet),
+    oshaHeatIllnessWaterShadeVerified: Boolean(opp?.oshaHeatIllnessWaterShadeVerified),
+  };
+
+  const completedChecksCount = Object.values(checklist).filter(Boolean).length;
+  const ambientTempF = Number(opp?.oshaAmbientTempF ?? 78);
+  const heatIllnessTriggerActive = ambientTempF >= 80;
+  const crewSignedCount = Number(opp?.oshaTailgateSignedByCrewCount ?? 0);
+  const competentPersonName = String(opp?.oshaCompetentPersonName || '').trim();
+
+  const blockers: string[] = [];
+  if (!checklist.oshaAnchorPointsInstalled) {
+    blockers.push('5,000-lb rated roof ridge fall-arrest anchors must be installed (OSHA 1926.501 / Cal/OSHA Title 8 § 1730).');
+  }
+  if (!checklist.oshaHarnessesInspected) {
+    blockers.push('Full-body PFAS harnesses and shock-absorbing lanyards must be inspected prior to roof access.');
+  }
+  if (!checklist.oshaLadderThreeFeetAboveEave) {
+    blockers.push('Access extension ladder must be tied off and extend at least 36 inches (3 ft) above roof eave.');
+  }
+  if (!checklist.oshaPerimeterCautionTapeSet) {
+    blockers.push('Ground drop-zone perimeter caution tape must be established around eaves and roll-off container.');
+  }
+  if (!checklist.oshaHeatIllnessWaterShadeVerified) {
+    blockers.push(
+      `Cal/OSHA Title 8 § 3395 Heat Illness Prevention potable water & shade canopy must be verified (${ambientTempF}°F forecast).`
+    );
+  }
+  if (crewSignedCount < 1) {
+    blockers.push('Daily Tailgate Safety / JSA Sign-In must record at least 1 crew member signature.');
+  }
+
+  return {
+    completedChecksCount,
+    totalChecksCount: 5,
+    ambientTempF,
+    heatIllnessTriggerActive,
+    crewSignedCount,
+    competentPersonName: competentPersonName || 'Unassigned Competent Person',
+    clearedForTearOff: blockers.length === 0,
+    checklist,
+    blockers,
+  };
+}
+
+app.get('/api/safety/:id/status', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const opp = opportunityMemoryStore.get(oppId) || { id: oppId };
+  const evaluation = evaluateCalOshaJobSiteSafety(opp);
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    oshaSafetyStatus: opp.oshaSafetyStatus || 'Pending Pre-Shift Check',
+    oshaJsaSheetUrl: opp.oshaJsaSheetUrl || null,
+    evaluation,
+  });
+});
+
+app.post('/api/safety/:id/log-tailgate', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const existing = opportunityMemoryStore.get(oppId) || { id: oppId };
+
+  const jsaUrl = `${process.env.PUBLIC_BASE_URL || 'http://localhost:4000'}/safety/${oppId}/jsa-sheet`;
+  const updatedOpp: any = {
+    ...existing,
+    oshaAnchorPointsInstalled:
+      req.body?.oshaAnchorPointsInstalled !== undefined
+        ? Boolean(req.body.oshaAnchorPointsInstalled)
+        : Boolean(existing.oshaAnchorPointsInstalled),
+    oshaHarnessesInspected:
+      req.body?.oshaHarnessesInspected !== undefined
+        ? Boolean(req.body.oshaHarnessesInspected)
+        : Boolean(existing.oshaHarnessesInspected),
+    oshaLadderThreeFeetAboveEave:
+      req.body?.oshaLadderThreeFeetAboveEave !== undefined
+        ? Boolean(req.body.oshaLadderThreeFeetAboveEave)
+        : Boolean(existing.oshaLadderThreeFeetAboveEave),
+    oshaPerimeterCautionTapeSet:
+      req.body?.oshaPerimeterCautionTapeSet !== undefined
+        ? Boolean(req.body.oshaPerimeterCautionTapeSet)
+        : Boolean(existing.oshaPerimeterCautionTapeSet),
+    oshaHeatIllnessWaterShadeVerified:
+      req.body?.oshaHeatIllnessWaterShadeVerified !== undefined
+        ? Boolean(req.body.oshaHeatIllnessWaterShadeVerified)
+        : Boolean(existing.oshaHeatIllnessWaterShadeVerified),
+    oshaAmbientTempF: Number(req.body?.oshaAmbientTempF ?? existing.oshaAmbientTempF ?? 84),
+    oshaTailgateSignedByCrewCount: Number(req.body?.oshaTailgateSignedByCrewCount ?? existing.oshaTailgateSignedByCrewCount ?? 5),
+    oshaCompetentPersonName: String(req.body?.oshaCompetentPersonName || existing.oshaCompetentPersonName || 'Marco Ramirez (OSHA 30 Competent Person)').trim(),
+    oshaJsaSheetUrl: jsaUrl,
+    oshaVerifiedAt: new Date().toISOString(),
+  };
+
+  const evaluation = evaluateCalOshaJobSiteSafety(updatedOpp);
+  updatedOpp.oshaSafetyStatus = evaluation.clearedForTearOff
+    ? 'Cal/OSHA Verified — Cleared for Tear-Off'
+    : `Safety Hold (${evaluation.completedChecksCount}/5 Verified)`;
+  opportunityMemoryStore.set(oppId, updatedOpp);
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    oshaSafetyStatus: updatedOpp.oshaSafetyStatus,
+    jsaUrl,
+    evaluation,
+    opportunity: updatedOpp,
+  });
+});
+
+app.post('/api/safety/:id/verify-tearoff-gate', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const existing = opportunityMemoryStore.get(oppId) || { id: oppId };
+  const evaluation = evaluateCalOshaJobSiteSafety(existing);
+
+  if (!evaluation.clearedForTearOff) {
+    return res.status(403).json({
+      success: false,
+      error: `CAL/OSHA 1926.501 SAFETY GATE: Crew is prohibited from starting roof tear-off until all Fall Protection and Heat Illness checks are verified. Missing: ${evaluation.blockers.join(' ')}`,
+      evaluation,
+    });
+  }
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    clearedForTearOff: true,
+    evaluation,
+  });
+});
+
+app.get('/safety/:id/jsa-sheet', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const opp = opportunityMemoryStore.get(oppId);
+  if (!opp) {
+    return res.status(404).send('<h2>Cal/OSHA JSA Safety Sheet Not Found</h2>');
+  }
+  const evaluation = evaluateCalOshaJobSiteSafety(opp);
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Cal/OSHA Daily JSA & Fall Protection Log — ${oppId}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f1f5f9; padding: 24px; color: #0f172a; }
+    .sheet { max-width: 760px; margin: 0 auto; background: #fff; border: 3px solid #0f172a; padding: 26px; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <div class="sheet">
+    <h1>CAL/OSHA TITLE 8 § 1730 & § 3395 DAILY JSA / TAILGATE LOG</h1>
+    <p><strong>Competent Person:</strong> ${evaluation.competentPersonName} • <strong>Crew Signed In:</strong> ${evaluation.crewSignedCount} Workers • <strong>Ambient Temp:</strong> ${evaluation.ambientTempF}°F</p>
+    <ul>
+      <li>[${evaluation.checklist.oshaAnchorPointsInstalled ? '✓' : ' '}] 5,000-lb Roof Ridge Fall-Arrest Anchors Installed</li>
+      <li>[${evaluation.checklist.oshaHarnessesInspected ? '✓' : ' '}] Full-Body PFAS Harnesses, D-Rings & Shock Lanyards Inspected</li>
+      <li>[${evaluation.checklist.oshaLadderThreeFeetAboveEave ? '✓' : ' '}] Access Ladder Secured & Extending >= 36" Above Eave</li>
+      <li>[${evaluation.checklist.oshaPerimeterCautionTapeSet ? '✓' : ' '}] Ground Drop-Zone Perimeter Caution Tape & Hardhat Zone Set</li>
+      <li>[${evaluation.checklist.oshaHeatIllnessWaterShadeVerified ? '✓' : ' '}] Cal/OSHA Title 8 § 3395 Fresh Water & Shade Canopy Station Verified</li>
+    </ul>
+  </div>
+</body>
+</html>`;
+
+  res.status(200).type('text/html').send(html);
+});
+
+// ==============================================================================
+// 6R. LEFTOVER MATERIAL RETURN & SUPPLIER CREDIT RECONCILIATION (FEATURE #18)
+// ==============================================================================
+
+export interface MaterialReturnCreditCalculation {
+  returnedBundlesCount: number;
+  returnedUnderlaymentRolls: number;
+  returnedRidgeCapBundles: number;
+  bundleUnitCredit: number;
+  underlaymentUnitCredit: number;
+  ridgeCapUnitCredit: number;
+  grossReturnCredit: number;
+  restockingFeePct: number;
+  restockingFeeAmount: number;
+  netCreditAmount: number;
+  originalMaterialCost: number;
+  adjustedMaterialCost: number;
+}
+
+export function calculateMaterialReturnCredit(input: {
+  returnedBundlesCount?: number;
+  returnedUnderlaymentRolls?: number;
+  returnedRidgeCapBundles?: number;
+  bundleUnitCredit?: number;
+  underlaymentUnitCredit?: number;
+  ridgeCapUnitCredit?: number;
+  restockingFeePct?: number;
+  originalMaterialCost?: number;
+}): MaterialReturnCreditCalculation {
+  const returnedBundlesCount = Math.max(0, Number(input?.returnedBundlesCount ?? 0));
+  const returnedUnderlaymentRolls = Math.max(0, Number(input?.returnedUnderlaymentRolls ?? 0));
+  const returnedRidgeCapBundles = Math.max(0, Number(input?.returnedRidgeCapBundles ?? 0));
+  const bundleUnitCredit = Number(input?.bundleUnitCredit ?? 42);
+  const underlaymentUnitCredit = Number(input?.underlaymentUnitCredit ?? 95);
+  const ridgeCapUnitCredit = Number(input?.ridgeCapUnitCredit ?? 58);
+  const restockingFeePct = Math.max(0, Number(input?.restockingFeePct ?? 0));
+  const originalMaterialCost = Math.max(0, Number(input?.originalMaterialCost ?? 7500));
+
+  const grossReturnCredit =
+    Math.round(
+      (returnedBundlesCount * bundleUnitCredit +
+        returnedUnderlaymentRolls * underlaymentUnitCredit +
+        returnedRidgeCapBundles * ridgeCapUnitCredit) *
+        100
+    ) / 100;
+
+  const restockingFeeAmount = Math.round(((grossReturnCredit * restockingFeePct) / 100) * 100) / 100;
+  const netCreditAmount = Math.round((grossReturnCredit - restockingFeeAmount) * 100) / 100;
+  const adjustedMaterialCost = Math.max(0, Math.round((originalMaterialCost - netCreditAmount) * 100) / 100);
+
+  return {
+    returnedBundlesCount,
+    returnedUnderlaymentRolls,
+    returnedRidgeCapBundles,
+    bundleUnitCredit,
+    underlaymentUnitCredit,
+    ridgeCapUnitCredit,
+    grossReturnCredit,
+    restockingFeePct,
+    restockingFeeAmount,
+    netCreditAmount,
+    originalMaterialCost,
+    adjustedMaterialCost,
+  };
+}
+
+app.get('/api/material-returns/:id/status', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const opp = opportunityMemoryStore.get(oppId) || { id: oppId };
+  const calculation = calculateMaterialReturnCredit({
+    returnedBundlesCount: opp.returnedBundlesCount,
+    returnedUnderlaymentRolls: opp.returnedUnderlaymentRolls,
+    returnedRidgeCapBundles: opp.returnedRidgeCapBundles,
+    restockingFeePct: opp.supplierRestockingFeePct,
+    originalMaterialCost: opp.actualMaterials ?? opp.materialCost ?? 7500,
+  });
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    supplierCreditMemoNumber: opp.supplierCreditMemoNumber || null,
+    calculation,
+  });
+});
+
+app.post('/api/material-returns/:id/reconcile-credit', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const existing = opportunityMemoryStore.get(oppId) || { id: oppId };
+
+  const originalMaterialCost = Number(
+    req.body?.originalMaterialCost ?? existing.actualMaterials ?? existing.materialCost ?? 7500
+  );
+
+  const calculation = calculateMaterialReturnCredit({
+    returnedBundlesCount: req.body?.returnedBundlesCount,
+    returnedUnderlaymentRolls: req.body?.returnedUnderlaymentRolls,
+    returnedRidgeCapBundles: req.body?.returnedRidgeCapBundles,
+    bundleUnitCredit: req.body?.bundleUnitCredit,
+    underlaymentUnitCredit: req.body?.underlaymentUnitCredit,
+    ridgeCapUnitCredit: req.body?.ridgeCapUnitCredit,
+    restockingFeePct: req.body?.restockingFeePct,
+    originalMaterialCost,
+  });
+
+  const creditMemoNumber = String(
+    req.body?.creditMemoNumber || `ABC-CM-${Date.now().toString().slice(-6)}`
+  ).trim();
+
+  const updatedOpp: any = {
+    ...existing,
+    returnedBundlesCount: calculation.returnedBundlesCount,
+    returnedUnderlaymentRolls: calculation.returnedUnderlaymentRolls,
+    returnedRidgeCapBundles: calculation.returnedRidgeCapBundles,
+    supplierCreditMemoNumber: creditMemoNumber,
+    supplierGrossReturnCredit: calculation.grossReturnCredit,
+    supplierRestockingFeePct: calculation.restockingFeePct,
+    supplierNetCreditAmount: calculation.netCreditAmount,
+    supplierCreditSyncedAt: new Date().toISOString(),
+    actualMaterials: calculation.adjustedMaterialCost,
+    materialCost: calculation.adjustedMaterialCost,
+  };
+
+  const costing = calculateJobCostingAndCommission(updatedOpp);
+  updatedOpp.totalJobCost = costing.totalJobCost;
+  updatedOpp.grossProfit = costing.grossProfit;
+  updatedOpp.profitMarginPct = costing.grossMarginPercent;
+  opportunityMemoryStore.set(oppId, updatedOpp);
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    creditMemoNumber,
+    calculation,
+    costing,
+    opportunity: updatedOpp,
+  });
+});
+
+// ==============================================================================
+// 6S. SALES REP COMMISSION DRAW, SPLIT & FINAL SETTLEMENT GATE (FEATURE #19)
+// ==============================================================================
+
+export interface SalesCommissionSettlementEvaluation {
+  closerRepName: string;
+  canvasserRepName: string | null;
+  totalRevenue: number;
+  totalJobCost: number;
+  grossProfit: number;
+  commissionableProfit: number;
+  totalCommissionPool: number;
+  canvasserSplitPct: number;
+  canvasserGrossShare: number;
+  closerGrossShare: number;
+  advanceDrawPaid: number;
+  clawbackAmount: number;
+  closerNetPayable: number;
+  canvasserNetPayable: number;
+  unpaidBalance: number;
+  eligibleForFinalSettlement: boolean;
+  blockers: string[];
+}
+
+export function calculateCommissionSettlementAndSplit(opp: any): SalesCommissionSettlementEvaluation {
+  const normalizedOpp = {
+    ...opp,
+    totalClaimRcv: opp?.totalClaimRcv ?? opp?.rcvApprovedAmount ?? opp?.amount ?? 20000,
+    actualMaterialCost: opp?.actualMaterialCost ?? opp?.actualMaterials ?? 6000,
+    actualLaborCost: opp?.actualLaborCost ?? opp?.actualLabor ?? 4000,
+  };
+  const costing = calculateJobCostingAndCommission(normalizedOpp);
+  const closerRepName = String(opp?.salesCloserRepName || opp?.salesRepName || 'Jake Morrison').trim();
+  const canvasserRepName = opp?.salesCanvasserRepName ? String(opp.salesCanvasserRepName).trim() : null;
+  const canvasserSplitPct = Math.min(100, Math.max(0, Number(opp?.commissionCanvasserSplitPct ?? 0)));
+  const advanceDrawPaid = Math.max(0, Number(opp?.commissionAdvanceDrawPaid ?? 0));
+  const clawbackAmount = Math.max(0, Number(opp?.commissionClawbackAmount ?? 0));
+
+  const totalCommissionPool = costing.commissionAmount;
+  const canvasserGrossShare = Math.round(((totalCommissionPool * canvasserSplitPct) / 100) * 100) / 100;
+  const closerGrossShare = Math.round((totalCommissionPool - canvasserGrossShare) * 100) / 100;
+
+  const closerNetPayable = Math.max(
+    0,
+    Math.round((closerGrossShare - advanceDrawPaid - clawbackAmount) * 100) / 100
+  );
+  const canvasserNetPayable = canvasserGrossShare;
+
+  const unpaidBalance = Math.max(
+    0,
+    Math.round(Number(opp?.unpaidBalance ?? opp?.qboOpenBalance ?? 0) * 100) / 100
+  );
+
+  const blockers: string[] = [];
+  if (unpaidBalance > 0) {
+    blockers.push(
+      `PAID-IN-FULL COMMISSION GATE: Cannot release Final Sales Commission Settlement while job has an open unpaid balance of $${unpaidBalance.toFixed(2)}.`
+    );
+  }
+
+  return {
+    closerRepName,
+    canvasserRepName,
+    totalRevenue: costing.totalRevenue,
+    totalJobCost: costing.totalJobCost,
+    grossProfit: costing.grossProfit,
+    commissionableProfit: costing.commissionableProfit,
+    totalCommissionPool,
+    canvasserSplitPct,
+    canvasserGrossShare,
+    closerGrossShare,
+    advanceDrawPaid,
+    clawbackAmount,
+    closerNetPayable,
+    canvasserNetPayable,
+    unpaidBalance,
+    eligibleForFinalSettlement: blockers.length === 0,
+    blockers,
+  };
+}
+
+app.get('/api/commissions/:id/status', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const opp = opportunityMemoryStore.get(oppId) || { id: oppId };
+  const settlement = calculateCommissionSettlementAndSplit(opp);
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    commissionSettlementStatus: opp.commissionSettlementStatus || 'Pending Final Collection',
+    commissionQboBillId: opp.commissionQboBillId || null,
+    settlement,
+  });
+});
+
+app.post('/api/commissions/:id/record-draw', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const existing = opportunityMemoryStore.get(oppId) || { id: oppId };
+
+  const updatedOpp: any = {
+    ...existing,
+    salesCloserRepName: String(req.body?.closerRepName || existing.salesCloserRepName || 'Jake Morrison').trim(),
+    salesCanvasserRepName: req.body?.canvasserRepName || existing.salesCanvasserRepName || null,
+    commissionCanvasserSplitPct: Number(req.body?.canvasserSplitPct ?? existing.commissionCanvasserSplitPct ?? 20),
+    commissionAdvanceDrawPaid: Number(req.body?.drawAmount ?? existing.commissionAdvanceDrawPaid ?? 750),
+    unpaidBalance: req.body?.unpaidBalance !== undefined ? Number(req.body.unpaidBalance) : existing.unpaidBalance,
+  };
+
+  const settlement = calculateCommissionSettlementAndSplit(updatedOpp);
+  updatedOpp.commissionCloserNetPayable = settlement.closerNetPayable;
+  updatedOpp.commissionCanvasserNetPayable = settlement.canvasserNetPayable;
+  opportunityMemoryStore.set(oppId, updatedOpp);
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    settlement,
+    opportunity: updatedOpp,
+  });
+});
+
+app.post('/api/commissions/:id/settle', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const existing = opportunityMemoryStore.get(oppId) || { id: oppId };
+
+  if (req.body?.unpaidBalance !== undefined) {
+    existing.unpaidBalance = Number(req.body.unpaidBalance);
+  }
+
+  const settlement = calculateCommissionSettlementAndSplit(existing);
+  if (!settlement.eligibleForFinalSettlement) {
+    return res.status(403).json({
+      success: false,
+      error: settlement.blockers.join(' '),
+      settlement,
+    });
+  }
+
+  const vendor = await findOrCreateQuickBooksVendor({
+    displayName: `${settlement.closerRepName} (1099 Sales Commission)`,
+    vendor1099: true,
+  });
+
+  const qboBill = await createQuickBooksVendorBill({
+    vendorId: vendor.vendorId,
+    vendorName: vendor.displayName,
+    docNumber: `COMM-${oppId.slice(-6).toUpperCase()}`,
+    amount: settlement.closerNetPayable + settlement.canvasserNetPayable,
+    category: 'labor',
+    memo: `Final Sales Commission Settlement — Closer: ${settlement.closerRepName} ($${settlement.closerNetPayable.toFixed(2)} net after $${settlement.advanceDrawPaid.toFixed(2)} draw) + Canvasser Split ($${settlement.canvasserNetPayable.toFixed(2)})`,
+    customerId: existing.qboCustomerId ? String(existing.qboCustomerId) : undefined,
+  });
+
+  const updatedOpp = {
+    ...existing,
+    commissionCloserNetPayable: settlement.closerNetPayable,
+    commissionCanvasserNetPayable: settlement.canvasserNetPayable,
+    commissionSettlementStatus: 'Settled & Paid in QBO',
+    commissionQboBillId: qboBill.billId,
+    commissionSettledAt: new Date().toISOString(),
+  };
+  opportunityMemoryStore.set(oppId, updatedOpp);
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    commissionSettlementStatus: updatedOpp.commissionSettlementStatus,
+    qboBillId: qboBill.billId,
+    settlement,
+    opportunity: updatedOpp,
+  });
+});
+
+// ==============================================================================
+// 6T. LOW-SLOPE / COMMERCIAL FLAT ROOF (TPO/PVC) & TITLE 24 COOL ROOF (FEATURE #20)
+// ==============================================================================
+
+export interface LowSlopeFlatRoofEstimate {
+  flatRoofAreaSqFt: number;
+  roofSquares: number;
+  systemType: string;
+  membraneMil: 60 | 80;
+  polyisoRValue: number;
+  crrcSriRating: number;
+  title24CoolRoofCompliant: boolean;
+  scupperCount: number;
+  ndlWarrantyYears: 15 | 20 | 25;
+  membraneAndAdhesiveCost: number;
+  polyisoInsulationCost: number;
+  scupperAndTaperedCricketCost: number;
+  totalFlatRoofEstimate: number;
+}
+
+export function calculateLowSlopeFlatRoofEstimate(input: {
+  flatRoofAreaSqFt?: number;
+  systemType?: string;
+  membraneMil?: number;
+  polyisoRValue?: number;
+  crrcSriRating?: number;
+  scupperCount?: number;
+}): LowSlopeFlatRoofEstimate {
+  const flatRoofAreaSqFt = Math.max(100, Number(input?.flatRoofAreaSqFt ?? 2500));
+  const roofSquares = Math.round((flatRoofAreaSqFt / 100) * 100) / 100;
+  const systemType = String(input?.systemType || '60-Mil Mechanically Attached TPO').trim();
+  const membraneMil: 60 | 80 = Number(input?.membraneMil) === 80 ? 80 : 60;
+  const polyisoRValue = Number(input?.polyisoRValue ?? 20);
+  const crrcSriRating = Number(input?.crrcSriRating ?? 104);
+  const title24CoolRoofCompliant = crrcSriRating >= 75;
+  const scupperCount = Math.max(0, Number(input?.scupperCount ?? 2));
+
+  const perSqMembraneRate = membraneMil === 80 ? 780 : 650;
+  const perSqPolyisoRate = polyisoRValue >= 30 ? 310 : polyisoRValue > 0 ? 220 : 0;
+
+  const membraneAndAdhesiveCost = Math.round(roofSquares * perSqMembraneRate * 100) / 100;
+  const polyisoInsulationCost = Math.round(roofSquares * perSqPolyisoRate * 100) / 100;
+  const scupperAndTaperedCricketCost = Math.round(scupperCount * 425 * 100) / 100;
+  const totalFlatRoofEstimate =
+    Math.round((membraneAndAdhesiveCost + polyisoInsulationCost + scupperAndTaperedCricketCost) * 100) / 100;
+
+  let ndlWarrantyYears: 15 | 20 | 25 = membraneMil === 80 ? 25 : 20;
+  if (systemType.toLowerCase().includes('silicone')) {
+    ndlWarrantyYears = 15;
+  }
+
+  return {
+    flatRoofAreaSqFt,
+    roofSquares,
+    systemType,
+    membraneMil,
+    polyisoRValue,
+    crrcSriRating,
+    title24CoolRoofCompliant,
+    scupperCount,
+    ndlWarrantyYears,
+    membraneAndAdhesiveCost,
+    polyisoInsulationCost,
+    scupperAndTaperedCricketCost,
+    totalFlatRoofEstimate,
+  };
+}
+
+app.get('/api/flat-roof/:id/status', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const opp = opportunityMemoryStore.get(oppId) || { id: oppId };
+  const estimate = calculateLowSlopeFlatRoofEstimate({
+    flatRoofAreaSqFt: opp.flatRoofAreaSqFt,
+    systemType: opp.flatRoofSystemType,
+    membraneMil: opp.flatRoofMembraneMil,
+    polyisoRValue: opp.flatRoofPolyisoRValue,
+    crrcSriRating: opp.flatRoofCrrcSriRating,
+    scupperCount: opp.flatRoofScupperCount,
+  });
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    estimate,
+  });
+});
+
+app.post('/api/flat-roof/:id/calculate-quote', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const existing = opportunityMemoryStore.get(oppId) || { id: oppId };
+
+  const estimate = calculateLowSlopeFlatRoofEstimate({
+    flatRoofAreaSqFt: req.body?.flatRoofAreaSqFt ?? existing.flatRoofAreaSqFt,
+    systemType: req.body?.systemType ?? existing.flatRoofSystemType,
+    membraneMil: req.body?.membraneMil ?? existing.flatRoofMembraneMil,
+    polyisoRValue: req.body?.polyisoRValue ?? existing.flatRoofPolyisoRValue,
+    crrcSriRating: req.body?.crrcSriRating ?? existing.flatRoofCrrcSriRating,
+    scupperCount: req.body?.scupperCount ?? existing.flatRoofScupperCount,
+  });
+
+  const updatedOpp = {
+    ...existing,
+    flatRoofAreaSqFt: estimate.flatRoofAreaSqFt,
+    flatRoofSystemType: estimate.systemType,
+    flatRoofMembraneMil: estimate.membraneMil,
+    flatRoofPolyisoRValue: estimate.polyisoRValue,
+    flatRoofCrrcSriRating: estimate.crrcSriRating,
+    flatRoofTitle24Compliant: estimate.title24CoolRoofCompliant,
+    flatRoofScupperCount: estimate.scupperCount,
+    flatRoofNdlWarrantyYears: estimate.ndlWarrantyYears,
+    flatRoofTotalEstimate: estimate.totalFlatRoofEstimate,
+  };
+  opportunityMemoryStore.set(oppId, updatedOpp);
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    estimate,
+    opportunity: updatedOpp,
+  });
+});
+
+// ==============================================================================
 // 7. SERVER BOOTSTRAP
 // ==============================================================================
 async function start() {

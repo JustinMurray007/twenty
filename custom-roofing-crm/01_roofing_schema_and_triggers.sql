@@ -799,6 +799,82 @@ ALTER TABLE "opportunity"
     ADD COLUMN IF NOT EXISTS "serviceTicketSlaDeadline" TIMESTAMPTZ,
     ADD COLUMN IF NOT EXISTS "serviceTicketResolvedAt" TIMESTAMPTZ;
 
+-- ==============================================================================
+-- 22. CALIFORNIA STATUTORY 20-DAY PRELIMINARY NOTICE & LIEN WAIVERS (§§ 8132-8138)
+-- ==============================================================================
+ALTER TABLE "opportunity"
+    ADD COLUMN IF NOT EXISTS "preliminaryNoticeFirstWorkDate" DATE,
+    ADD COLUMN IF NOT EXISTS "preliminaryNoticeDeadlineDate" DATE,
+    ADD COLUMN IF NOT EXISTS "preliminaryNoticeServedAt" TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS "preliminaryNoticeCertMailTracking" VARCHAR(100),
+    ADD COLUMN IF NOT EXISTS "statutoryWaiverType" VARCHAR(80),
+    ADD COLUMN IF NOT EXISTS "statutoryWaiverSection" VARCHAR(40),
+    ADD COLUMN IF NOT EXISTS "statutoryWaiverAmount" NUMERIC(12,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS "statutoryWaiverThroughDate" DATE,
+    ADD COLUMN IF NOT EXISTS "statutoryWaiverDisputedAmount" NUMERIC(12,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS "statutoryWaiverUrl" TEXT,
+    ADD COLUMN IF NOT EXISTS "statutoryWaiverGeneratedAt" TIMESTAMPTZ;
+
+-- ==============================================================================
+-- 23. CAL/OSHA 1926.501 DAILY FALL-PROTECTION & HEAT-ILLNESS TAILGATE SAFETY LOG
+-- ==============================================================================
+ALTER TABLE "opportunity"
+    ADD COLUMN IF NOT EXISTS "oshaAnchorPointsInstalled" BOOLEAN DEFAULT false,
+    ADD COLUMN IF NOT EXISTS "oshaHarnessesInspected" BOOLEAN DEFAULT false,
+    ADD COLUMN IF NOT EXISTS "oshaLadderThreeFeetAboveEave" BOOLEAN DEFAULT false,
+    ADD COLUMN IF NOT EXISTS "oshaPerimeterCautionTapeSet" BOOLEAN DEFAULT false,
+    ADD COLUMN IF NOT EXISTS "oshaHeatIllnessWaterShadeVerified" BOOLEAN DEFAULT false,
+    ADD COLUMN IF NOT EXISTS "oshaAmbientTempF" INTEGER DEFAULT 78,
+    ADD COLUMN IF NOT EXISTS "oshaTailgateSignedByCrewCount" INTEGER DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS "oshaCompetentPersonName" VARCHAR(150),
+    ADD COLUMN IF NOT EXISTS "oshaSafetyStatus" VARCHAR(60) DEFAULT 'Pending Pre-Shift Check',
+    ADD COLUMN IF NOT EXISTS "oshaVerifiedAt" TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS "oshaJsaSheetUrl" TEXT;
+
+-- ==============================================================================
+-- 24. LEFTOVER MATERIAL RETURN & SUPPLIER CREDIT MEMO RECONCILIATION
+-- ==============================================================================
+ALTER TABLE "opportunity"
+    ADD COLUMN IF NOT EXISTS "returnedBundlesCount" INTEGER DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS "returnedUnderlaymentRolls" INTEGER DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS "returnedRidgeCapBundles" INTEGER DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS "supplierCreditMemoNumber" VARCHAR(100),
+    ADD COLUMN IF NOT EXISTS "supplierGrossReturnCredit" NUMERIC(10,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS "supplierRestockingFeePct" NUMERIC(5,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS "supplierNetCreditAmount" NUMERIC(10,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS "supplierCreditSyncedAt" TIMESTAMPTZ;
+
+-- ==============================================================================
+-- 25. SALES REP COMMISSION DRAW, CANVASSER SPLIT & FINAL SETTLEMENT GATE
+-- ==============================================================================
+ALTER TABLE "opportunity"
+    ADD COLUMN IF NOT EXISTS "salesCloserRepName" VARCHAR(150),
+    ADD COLUMN IF NOT EXISTS "salesCanvasserRepName" VARCHAR(150),
+    ADD COLUMN IF NOT EXISTS "commissionRatePct" NUMERIC(5,2) DEFAULT 50.00,
+    ADD COLUMN IF NOT EXISTS "commissionOfficeOverheadPct" NUMERIC(5,2) DEFAULT 10.00,
+    ADD COLUMN IF NOT EXISTS "commissionCanvasserSplitPct" NUMERIC(5,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS "commissionAdvanceDrawPaid" NUMERIC(10,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS "commissionClawbackAmount" NUMERIC(10,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS "commissionCloserNetPayable" NUMERIC(10,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS "commissionCanvasserNetPayable" NUMERIC(10,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS "commissionSettlementStatus" VARCHAR(60) DEFAULT 'Pending Final Collection',
+    ADD COLUMN IF NOT EXISTS "commissionQboBillId" VARCHAR(100),
+    ADD COLUMN IF NOT EXISTS "commissionSettledAt" TIMESTAMPTZ;
+
+-- ==============================================================================
+-- 26. LOW-SLOPE / COMMERCIAL FLAT ROOF (TPO/PVC/SILICONE) & TITLE 24 COOL ROOF
+-- ==============================================================================
+ALTER TABLE "opportunity"
+    ADD COLUMN IF NOT EXISTS "flatRoofAreaSqFt" INTEGER DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS "flatRoofSystemType" VARCHAR(80),
+    ADD COLUMN IF NOT EXISTS "flatRoofMembraneMil" INTEGER DEFAULT 60,
+    ADD COLUMN IF NOT EXISTS "flatRoofPolyisoRValue" INTEGER DEFAULT 20,
+    ADD COLUMN IF NOT EXISTS "flatRoofCrrcSriRating" INTEGER DEFAULT 104,
+    ADD COLUMN IF NOT EXISTS "flatRoofTitle24Compliant" BOOLEAN DEFAULT true,
+    ADD COLUMN IF NOT EXISTS "flatRoofScupperCount" INTEGER DEFAULT 2,
+    ADD COLUMN IF NOT EXISTS "flatRoofNdlWarrantyYears" INTEGER DEFAULT 20,
+    ADD COLUMN IF NOT EXISTS "flatRoofTotalEstimate" NUMERIC(12,2) DEFAULT 0.00;
+
 -- Trigger notification confirmation
 SELECT 'Roofing schema, production routing, and real-time profitability triggers successfully compiled.' AS status;
 

@@ -71,6 +71,11 @@ module.exports = {
   calculateRoofFinancingOffer: service.calculateRoofFinancingOffer,
   calculateXactimateCodeSupplement: service.calculateXactimateCodeSupplement,
   evaluateServiceTicketTriage: service.evaluateServiceTicketTriage,
+  evaluateCaliforniaStatutoryWaiverAndPrelim: service.evaluateCaliforniaStatutoryWaiverAndPrelim,
+  evaluateCalOshaJobSiteSafety: service.evaluateCalOshaJobSiteSafety,
+  calculateMaterialReturnCredit: service.calculateMaterialReturnCredit,
+  calculateCommissionSettlementAndSplit: service.calculateCommissionSettlementAndSplit,
+  calculateLowSlopeFlatRoofEstimate: service.calculateLowSlopeFlatRoofEstimate,
 };
 
 
