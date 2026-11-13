@@ -12846,106 +12846,106 @@ app.post('/webhooks/simplifile', async (req: Request, res: Response) => {
 
     // Fallback: Most recent Opportunity in 'Recording In Progress'
     if (!opp) {
-    try {
-      const dbClient = await pool.connect();
       try {
-        const dbRes = await dbClient.query(
-          `SELECT * FROM "opportunity"
+        const dbClient = await pool.connect();
+        try {
+          const dbRes = await dbClient.query(
+            `SELECT * FROM "opportunity"
              WHERE "billingStage" = 'Recording In Progress'
              ORDER BY "updatedAt" DESC
              LIMIT 1`
-        );
-        if (dbRes.rows.length > 0) {
-          opp = dbRes.rows[0];
+          );
+          if (dbRes.rows.length > 0) {
+            opp = dbRes.rows[0];
+          }
+        } finally {
+          dbClient.release();
         }
-      } finally {
-        dbClient.release();
+      } catch (dbErr: any) {
+        console.warn('[Simplifile Webhook] Fallback Recording In Progress lookup note:', dbErr.message);
       }
-    } catch (dbErr: any) {
-      console.warn('[Simplifile Webhook] Fallback Recording In Progress lookup note:', dbErr.message);
     }
-  }
 
-  if (!opp) {
-    console.warn(`[Simplifile Webhook] Opportunity for packageId ${packageId || 'unknown'} not found.`);
-    return;
-  }
+    if (!opp) {
+      console.warn(`[Simplifile Webhook] Opportunity for packageId ${packageId || 'unknown'} not found.`);
+      return;
+    }
 
-  // 2. Download Officially Stamped Document from Simplifile
-  const stampedDocUrl = recordedDoc?.stampedFileUrl || payload.stampedFileUrl;
-  let stampedPdfBuffer: Buffer | null = null;
+    // 2. Download Officially Stamped Document from Simplifile
+    const stampedDocUrl = recordedDoc?.stampedFileUrl || payload.stampedFileUrl;
+    let stampedPdfBuffer: Buffer | null = null;
 
-  if (stampedDocUrl) {
-    try {
-      const docRes = await fetch(stampedDocUrl, {
-        headers: { Authorization: `Bearer ${SIMPLIFILE_API_KEY}` },
-      });
-      if (docRes.ok) {
-        const ab = await docRes.arrayBuffer();
-        stampedPdfBuffer = Buffer.from(ab);
+    if (stampedDocUrl) {
+      try {
+        const docRes = await fetch(stampedDocUrl, {
+          headers: { Authorization: `Bearer ${SIMPLIFILE_API_KEY}` },
+        });
+        if (docRes.ok) {
+          const ab = await docRes.arrayBuffer();
+          stampedPdfBuffer = Buffer.from(ab);
+        }
+      } catch (downloadErr: any) {
+        console.warn('[Simplifile Webhook] Stamped doc fetch note:', downloadErr.message);
       }
-    } catch (downloadErr: any) {
-      console.warn('[Simplifile Webhook] Stamped doc fetch note:', downloadErr.message);
     }
-  }
 
-  // If no remote URL or testing, generate stamped PDF locally
-  if (!stampedPdfBuffer) {
-    try {
-      stampedPdfBuffer = await generateReleaseOfLienPdfBuffer({
-        ownerName: opp.customerName || opp.name || 'Property Owner',
-        street: opp.addressStreet || 'N/A',
-        city: opp.addressCity || 'San Diego',
-        state: opp.addressState || 'CA',
-        zip: opp.addressPostcode || '92101',
-        apn: opp.assessorParcelNumber || 'See County Assessor Records',
-        recordedDocNum: countyDocNumber,
-        recordedDate: new Date(recordedTimestamp).toLocaleDateString('en-US'),
-        companyName: process.env.COMPANY_LEGAL_NAME || 'Roofing Operations Dept.',
-        companyAddress: `${process.env.COMPANY_ADDRESS_LINE1 || '1234 Main St'}, ${process.env.COMPANY_ADDRESS_CITY || 'San Diego'}, ${process.env.COMPANY_ADDRESS_STATE || 'CA'} ${process.env.COMPANY_ADDRESS_ZIP || '92101'}`,
-      });
-    } catch (pdfErr: any) {
-      console.warn('[Simplifile Webhook] Stamped fallback PDF note:', pdfErr.message);
+    // If no remote URL or testing, generate stamped PDF locally
+    if (!stampedPdfBuffer) {
+      try {
+        stampedPdfBuffer = await generateReleaseOfLienPdfBuffer({
+          ownerName: opp.customerName || opp.name || 'Property Owner',
+          street: opp.addressStreet || 'N/A',
+          city: opp.addressCity || 'San Diego',
+          state: opp.addressState || 'CA',
+          zip: opp.addressPostcode || '92101',
+          apn: opp.assessorParcelNumber || 'See County Assessor Records',
+          recordedDocNum: countyDocNumber,
+          recordedDate: new Date(recordedTimestamp).toLocaleDateString('en-US'),
+          companyName: process.env.COMPANY_LEGAL_NAME || 'Roofing Operations Dept.',
+          companyAddress: `${process.env.COMPANY_ADDRESS_LINE1 || '1234 Main St'}, ${process.env.COMPANY_ADDRESS_CITY || 'San Diego'}, ${process.env.COMPANY_ADDRESS_STATE || 'CA'} ${process.env.COMPANY_ADDRESS_ZIP || '92101'}`,
+        });
+      } catch (pdfErr: any) {
+        console.warn('[Simplifile Webhook] Stamped fallback PDF note:', pdfErr.message);
+      }
     }
-  }
 
-  // 3. Attach Stamped PDF to Twenty Opportunity
-  const fileName = `RECORDED-Release-${countyDocNumber}.pdf`;
-  if (stampedPdfBuffer) {
-    await attachPdfToTwentyOpportunity(stampedPdfBuffer, fileName, opp.id);
-  }
-
-  const recordedServiceUrl = process.env.APP_BASE_URL || 'http://localhost:4000';
-  const recordedPdfUrl = stampedDocUrl || `${recordedServiceUrl}/legal/release-of-lien/${opp.id}/pdf`;
-
-  // 4. Update Opportunity in Twenty CRM
-  if (TWENTY_API_KEY) {
-    try {
-      await fetch(`${TWENTY_BASE_URL}/rest/opportunities/${opp.id}`, {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${TWENTY_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          billingStage: 'Lien Discharged / Recorded',
-          countyDocumentNumber: countyDocNumber,
-          countyRecordedAt: recordedTimestamp,
-          recordingFeePaid: feeCharged,
-          stampedRecordingPdfUrl: recordedPdfUrl,
-        }),
-      });
-    } catch (patchErr: any) {
-      console.warn('[Simplifile Webhook] Twenty PATCH note:', patchErr.message);
+    // 3. Attach Stamped PDF to Twenty Opportunity
+    const fileName = `RECORDED-Release-${countyDocNumber}.pdf`;
+    if (stampedPdfBuffer) {
+      await attachPdfToTwentyOpportunity(stampedPdfBuffer, fileName, opp.id);
     }
-  }
 
-  // Update PostgreSQL
-  try {
-    const dbClient = await pool.connect();
+    const recordedServiceUrl = process.env.APP_BASE_URL || 'http://localhost:4000';
+    const recordedPdfUrl = stampedDocUrl || `${recordedServiceUrl}/legal/release-of-lien/${opp.id}/pdf`;
+
+    // 4. Update Opportunity in Twenty CRM
+    if (TWENTY_API_KEY) {
+      try {
+        await fetch(`${TWENTY_BASE_URL}/rest/opportunities/${opp.id}`, {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${TWENTY_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            billingStage: 'Lien Discharged / Recorded',
+            countyDocumentNumber: countyDocNumber,
+            countyRecordedAt: recordedTimestamp,
+            recordingFeePaid: feeCharged,
+            stampedRecordingPdfUrl: recordedPdfUrl,
+          }),
+        });
+      } catch (patchErr: any) {
+        console.warn('[Simplifile Webhook] Twenty PATCH note:', patchErr.message);
+      }
+    }
+
+    // Update PostgreSQL
     try {
-      await dbClient.query(
-        `UPDATE "opportunity"
+      const dbClient = await pool.connect();
+      try {
+        await dbClient.query(
+          `UPDATE "opportunity"
            SET "billingStage" = 'Lien Discharged / Recorded',
                "countyDocumentNumber" = $1,
                "countyRecordedAt" = $2,
@@ -12953,59 +12953,59 @@ app.post('/webhooks/simplifile', async (req: Request, res: Response) => {
                "stampedRecordingPdfUrl" = $4,
                "updatedAt" = NOW()
            WHERE "id"::text = $5`,
-        [countyDocNumber, recordedTimestamp, feeCharged, recordedPdfUrl, opp.id]
-      );
-    } finally {
-      dbClient.release();
+          [countyDocNumber, recordedTimestamp, feeCharged, recordedPdfUrl, opp.id]
+        );
+      } finally {
+        dbClient.release();
+      }
+    } catch (pgErr: any) {
+      console.warn('[Simplifile Webhook] Postgres update note:', pgErr.message);
     }
-  } catch (pgErr: any) {
-    console.warn('[Simplifile Webhook] Postgres update note:', pgErr.message);
-  }
 
-  // 5. Post Activity Note
-  if (TWENTY_API_KEY) {
-    try {
-      await fetch(`${TWENTY_BASE_URL}/rest/notes`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${TWENTY_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          title: `RECORDING CONFIRMED: ${countyDocNumber}`,
-          body:
-            `Full Release of Mechanic's Lien recorded with San Diego County Recorder.\n\n` +
-            `• Instrument Number: ${countyDocNumber}\n` +
-            `• Recorded Date: ${new Date(recordedTimestamp).toLocaleString('en-US')}\n` +
-            `• County Recording Fee: $${feeCharged.toFixed(2)}\n` +
-            `• Stamped Copy: Attached to record files. Title is officially cleared.`,
-          targetableObject: 'opportunity',
-          targetableId: opp.id,
-        }),
-      });
-    } catch (noteErr: any) {
-      console.warn('[Simplifile Webhook] Note creation note:', noteErr.message);
+    // 5. Post Activity Note
+    if (TWENTY_API_KEY) {
+      try {
+        await fetch(`${TWENTY_BASE_URL}/rest/notes`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${TWENTY_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            title: `RECORDING CONFIRMED: ${countyDocNumber}`,
+            body:
+              `Full Release of Mechanic's Lien recorded with San Diego County Recorder.\n\n` +
+              `• Instrument Number: ${countyDocNumber}\n` +
+              `• Recorded Date: ${new Date(recordedTimestamp).toLocaleString('en-US')}\n` +
+              `• County Recording Fee: $${feeCharged.toFixed(2)}\n` +
+              `• Stamped Copy: Attached to record files. Title is officially cleared.`,
+            targetableObject: 'opportunity',
+            targetableId: opp.id,
+          }),
+        });
+      } catch (noteErr: any) {
+        console.warn('[Simplifile Webhook] Note creation note:', noteErr.message);
+      }
     }
-  }
 
-  // 6. Notify Property Owner via SMS that Title is Cleared
-  const phoneToNotify = opp.phone || opp.customerPhone;
-  if (twilioClient && phoneToNotify) {
-    try {
-      await twilioClient.messages.create({
-        body: `NOTICE: Your roof replacement account has been cleared of record. Full Release of Lien has been officially recorded with San Diego County (Instrument #${countyDocNumber}). Thank you!`,
-        from: process.env.TWILIO_PHONE_NUMBER,
-        to: phoneToNotify,
-      });
-    } catch (smsErr: any) {
-      console.warn('[Simplifile Webhook SMS note]:', smsErr.message);
+    // 6. Notify Property Owner via SMS that Title is Cleared
+    const phoneToNotify = opp.phone || opp.customerPhone;
+    if (twilioClient && phoneToNotify) {
+      try {
+        await twilioClient.messages.create({
+          body: `NOTICE: Your roof replacement account has been cleared of record. Full Release of Lien has been officially recorded with San Diego County (Instrument #${countyDocNumber}). Thank you!`,
+          from: process.env.TWILIO_PHONE_NUMBER,
+          to: phoneToNotify,
+        });
+      } catch (smsErr: any) {
+        console.warn('[Simplifile Webhook SMS note]:', smsErr.message);
+      }
     }
-  }
 
-  console.log(`[Simplifile Complete] Opportunity ${opp.id} marked Discharged with Doc #${countyDocNumber}.`);
-} catch (error: any) {
-  console.error('[Simplifile Webhook Error]:', error);
-}
+    console.log(`[Simplifile Complete] Opportunity ${opp.id} marked Discharged with Doc #${countyDocNumber}.`);
+  } catch (error: any) {
+    console.error('[Simplifile Webhook Error]:', error);
+  }
 });
 
 // ==============================================================================
@@ -19176,9 +19176,8 @@ app.post('/api/permits/:id/schedule-inspection', async (req: Request, res: Respo
     opp.midRoofInspectionStatus !== 'Waived (Photo Affidavit)'
   ) {
     return res.status(403).json({
-      error: `MID-ROOF INSPECTION GATE: Cannot schedule Final Municipal Building Inspection until the Mid-Roof Decking Nailing Inspection is Passed (current status: ${
-        opp.midRoofInspectionStatus || 'Pending'
-      }).`,
+      error: `MID-ROOF INSPECTION GATE: Cannot schedule Final Municipal Building Inspection until the Mid-Roof Decking Nailing Inspection is Passed (current status: ${opp.midRoofInspectionStatus || 'Pending'
+        }).`,
     });
   }
 
@@ -19229,13 +19228,13 @@ app.post('/api/permits/:id/schedule-inspection', async (req: Request, res: Respo
     permitStatus: isFinal ? 'Final Inspection Scheduled' : 'Mid-Roof Inspection Scheduled',
     ...(isFinal
       ? {
-          finalInspectionScheduledAt: schedIso,
-          finalInspectionStatus: 'Scheduled',
-        }
+        finalInspectionScheduledAt: schedIso,
+        finalInspectionStatus: 'Scheduled',
+      }
       : {
-          midRoofInspectionScheduledAt: schedIso,
-          midRoofInspectionStatus: 'Scheduled',
-        }),
+        midRoofInspectionScheduledAt: schedIso,
+        midRoofInspectionStatus: 'Scheduled',
+      }),
     inspectorName: inspectorName || opp.inspectorName || null,
     inspectionNotes: notes || opp.inspectionNotes || null,
     smsThread: existingThread,
@@ -19289,8 +19288,8 @@ app.post('/api/permits/:id/record-inspection-result', async (req: Request, res: 
         ? `🏛️✅ FINAL CITY INSPECTION PASSED: ${jobAddress} (Permit #${opp.permitNumber}). Signed off by ${inspector}. Permit is officially closed!`
         : `⚠️ FINAL INSPECTION CORRECTION REQUIRED: ${jobAddress} (Permit #${opp.permitNumber}). Notes: ${notes || 'See inspector correction notice'}.`
       : isPassed
-      ? `🔨✅ MID-ROOF NAILING INSPECTION PASSED: ${jobAddress} (Permit #${opp.permitNumber}). Signed off by ${inspector}. Cleared to install shingles immediately!`
-      : `🛑 MID-ROOF NAILING CORRECTION REQUIRED: ${jobAddress} (Permit #${opp.permitNumber}). Do NOT install shingles until re-inspected. Notes: ${notes || 'Check perimeter nail spacing'}.`;
+        ? `🔨✅ MID-ROOF NAILING INSPECTION PASSED: ${jobAddress} (Permit #${opp.permitNumber}). Signed off by ${inspector}. Cleared to install shingles immediately!`
+        : `🛑 MID-ROOF NAILING CORRECTION REQUIRED: ${jobAddress} (Permit #${opp.permitNumber}). Do NOT install shingles until re-inspected. Notes: ${notes || 'Check perimeter nail spacing'}.`;
 
     try {
       if (twilioClient && (process.env.TWILIO_PHONE_NUMBER || TWILIO_PHONE_NUMBER)) {
@@ -19356,21 +19355,21 @@ app.post('/api/permits/:id/record-inspection-result', async (req: Request, res: 
       ? 'Final Inspection Passed - Permit Closed'
       : 'Correction Notice / Failed'
     : isPassed
-    ? 'Mid-Roof Passed'
-    : 'Correction Notice / Failed';
+      ? 'Mid-Roof Passed'
+      : 'Correction Notice / Failed';
 
   const updatedOpp = {
     ...opp,
     permitStatus: newPermitStatus,
     ...(isFinal
       ? {
-          finalInspectionStatus: statusValue,
-          finalInspectionPassedAt: isPassed ? nowIso : opp.finalInspectionPassedAt || null,
-        }
+        finalInspectionStatus: statusValue,
+        finalInspectionPassedAt: isPassed ? nowIso : opp.finalInspectionPassedAt || null,
+      }
       : {
-          midRoofInspectionStatus: statusValue,
-          midRoofPassedAt: isPassed ? nowIso : opp.midRoofPassedAt || null,
-        }),
+        midRoofInspectionStatus: statusValue,
+        midRoofPassedAt: isPassed ? nowIso : opp.midRoofPassedAt || null,
+      }),
     inspectorName: inspector,
     inspectionNotes: notes || opp.inspectionNotes || null,
     smsThread: existingThread,
@@ -19480,6 +19479,1042 @@ app.get('/permits/:id/card', async (req: Request, res: Response) => {
 </html>`;
 
   res.status(200).type('text/html').send(html);
+});
+
+// ==============================================================================
+// 6F. MORTGAGE COMPANY / LOSS DRAFT ENDORSEMENT TRACKER (FEATURE #6)
+// ==============================================================================
+
+export interface MortgageLossDraftEvaluation {
+  isMortgageEndorsementRequired: boolean;
+  mortgageCompanyName: string;
+  mortgageLoanNumber: string;
+  lossDraftStatus: string;
+  checkAmount: number;
+  escrowHoldbackBalance: number;
+  readyForRelease: boolean;
+  checklist: {
+    signedContractAttached: boolean;
+    contractorW9Attached: boolean;
+    contractorCoiAttached: boolean;
+    adjusterLossSheetAttached: boolean;
+    homeownerAffidavitSigned: boolean;
+    propertyInspectionPassed: boolean;
+  };
+  blockers: string[];
+}
+
+export function evaluateMortgageLossDraftRequirements(opp: any): MortgageLossDraftEvaluation {
+  const checkAmount = Number(
+    opp?.lossDraftCheckAmount ?? opp?.acvReceivedAmount ?? opp?.rcvApprovedAmount ?? 0
+  );
+  const holdbackAmount = Number(opp?.lossDraftHoldbackAmount ?? 0);
+  const mortgageCompanyName = String(opp?.mortgageCompanyName || '').trim();
+  const mortgageLoanNumber = String(opp?.mortgageLoanNumber || '').trim();
+  const isMortgageEndorsementRequired = Boolean(mortgageCompanyName) || checkAmount >= 10000;
+
+  const checklistSignedContract = Boolean(opp?.contractSignedAt || opp?.proposalAcceptedAt || opp?.lossDraftPacketGeneratedAt);
+  const checklistW9 = opp?.w9Verified !== false;
+  const checklistCoi = opp?.coiVerified !== false;
+  const checklistAdjusterSheet = Boolean(opp?.claimNumber || opp?.rcvApprovedAmount || opp?.lossDraftPacketGeneratedAt);
+  const checklistAffidavit = Boolean(opp?.lossDraftPacketGeneratedAt);
+  const checklistInspection =
+    Number(opp?.lossDraftInspectionPct ?? 0) >= 100 ||
+    opp?.finalInspectionStatus === 'Passed' ||
+    opp?.lossDraftStatus === 'Endorsed Check Released' ||
+    opp?.lossDraftStatus === 'Inspection Passed';
+
+  const blockers: string[] = [];
+  if (isMortgageEndorsementRequired) {
+    if (!mortgageCompanyName) {
+      blockers.push('Mortgage servicer name is required for co-payable two-party insurance checks >= $10,000.');
+    }
+    if (!mortgageLoanNumber) {
+      blockers.push('Mortgage loan number is required on all Loss Draft Packet cover sheets.');
+    }
+    if (!checklistAffidavit) {
+      blockers.push('Loss Draft Submission Packet (Contract, W-9, COI, Claim Summary, Homeowner Affidavit) has not been generated.');
+    }
+    if (!checklistInspection && holdbackAmount > 0) {
+      blockers.push('Mortgage servicer 100% Property Completion Inspection is required before releasing final escrow holdback.');
+    }
+  }
+
+  return {
+    isMortgageEndorsementRequired,
+    mortgageCompanyName: mortgageCompanyName || 'Unassigned Mortgage Servicer',
+    mortgageLoanNumber: mortgageLoanNumber || 'Pending',
+    lossDraftStatus: opp?.lossDraftStatus || (isMortgageEndorsementRequired ? 'Pending Endorsement' : 'Not Required'),
+    checkAmount: Math.round(checkAmount * 100) / 100,
+    escrowHoldbackBalance: Math.round(holdbackAmount * 100) / 100,
+    readyForRelease: blockers.length === 0,
+    checklist: {
+      signedContractAttached: checklistSignedContract,
+      contractorW9Attached: checklistW9,
+      contractorCoiAttached: checklistCoi,
+      adjusterLossSheetAttached: checklistAdjusterSheet,
+      homeownerAffidavitSigned: checklistAffidavit,
+      propertyInspectionPassed: checklistInspection,
+    },
+    blockers,
+  };
+}
+
+app.get('/api/loss-draft/:id/status', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const opp = opportunityMemoryStore.get(oppId) || { id: oppId };
+  const evaluation = evaluateMortgageLossDraftRequirements(opp);
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    mortgageCompanyName: opp.mortgageCompanyName || null,
+    mortgageLoanNumber: opp.mortgageLoanNumber || null,
+    lossDraftDepartmentPhone: opp.lossDraftDepartmentPhone || null,
+    lossDraftCheckNumber: opp.lossDraftCheckNumber || null,
+    lossDraftCheckAmount: Number(opp.lossDraftCheckAmount ?? 0),
+    lossDraftHoldbackAmount: Number(opp.lossDraftHoldbackAmount ?? 0),
+    lossDraftTrackingNumber: opp.lossDraftTrackingNumber || null,
+    lossDraftStatus: opp.lossDraftStatus || evaluation.lossDraftStatus,
+    lossDraftPacketUrl: opp.lossDraftPacketUrl || null,
+    lossDraftInspectionScheduledAt: opp.lossDraftInspectionScheduledAt || null,
+    lossDraftInspectionPct: Number(opp.lossDraftInspectionPct ?? 0),
+    lossDraftEndorsedReceivedAt: opp.lossDraftEndorsedReceivedAt || null,
+    evaluation,
+  });
+});
+
+app.post('/api/loss-draft/:id/generate-packet', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const existing = opportunityMemoryStore.get(oppId) || { id: oppId };
+
+  const mortgageCompanyName = String(
+    req.body?.mortgageCompanyName || existing.mortgageCompanyName || 'Wells Fargo Home Mortgage Loss Draft Dept.'
+  ).trim();
+  const mortgageLoanNumber = String(
+    req.body?.mortgageLoanNumber || existing.mortgageLoanNumber || `LN-${oppId.slice(-6).toUpperCase()}`
+  ).trim();
+  const lossDraftDepartmentPhone = String(
+    req.body?.lossDraftDepartmentPhone || existing.lossDraftDepartmentPhone || '1-800-678-7986'
+  ).trim();
+  const checkNumber = String(req.body?.checkNumber || existing.lossDraftCheckNumber || 'CHK-88410').trim();
+  const checkAmount = Number(req.body?.checkAmount ?? existing.lossDraftCheckAmount ?? existing.acvReceivedAmount ?? 14500);
+  const holdbackAmount = Number(req.body?.holdbackAmount ?? existing.lossDraftHoldbackAmount ?? Math.round(checkAmount * 0.5 * 100) / 100);
+  const courierTrackingNumber = String(
+    req.body?.courierTrackingNumber || existing.lossDraftTrackingNumber || `FDX-${Date.now().toString().slice(-8)}`
+  ).trim();
+  const notes = String(req.body?.notes || existing.lossDraftNotes || '').trim();
+
+  const packetUrl = `${process.env.PUBLIC_BASE_URL || 'http://localhost:4000'}/loss-draft/${oppId}/packet`;
+  const nowIso = new Date().toISOString();
+
+  const updatedOpp = {
+    ...existing,
+    mortgageCompanyName,
+    mortgageLoanNumber,
+    lossDraftDepartmentPhone,
+    lossDraftCheckNumber: checkNumber,
+    lossDraftCheckAmount: checkAmount,
+    lossDraftHoldbackAmount: holdbackAmount,
+    lossDraftTrackingNumber: courierTrackingNumber,
+    lossDraftStatus: 'Packet Submitted to Mortgage Servicer',
+    lossDraftPacketGeneratedAt: nowIso,
+    lossDraftPacketUrl: packetUrl,
+    lossDraftNotes: notes,
+  };
+  opportunityMemoryStore.set(oppId, updatedOpp);
+
+  const homeownerPhone = updatedOpp.homeownerPhone || updatedOpp.customerPhone || '+16195550111';
+  const smsBody =
+    `🏦 MORTGAGE LOSS DRAFT PACKET SUBMITTED\n\n` +
+    `• Servicer: ${mortgageCompanyName} (Loan #${mortgageLoanNumber})\n` +
+    `• Two-Party Check: #${checkNumber} ($${checkAmount.toFixed(2)})\n` +
+    `• Overnight Tracking: ${courierTrackingNumber}\n` +
+    `• Packet Link: ${packetUrl}\n\n` +
+    `We have submitted our W-9, Contractor License, COI, and Signed Contract so ${mortgageCompanyName} can endorse and release your claim funds.`;
+  console.log(`[Loss Draft Packet SMS] [Dev Mode] Sent to Homeowner (${homeownerPhone}):\n${smsBody}`);
+
+  const evaluation = evaluateMortgageLossDraftRequirements(updatedOpp);
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    mortgageCompanyName,
+    mortgageLoanNumber,
+    checkNumber,
+    checkAmount,
+    holdbackAmount,
+    courierTrackingNumber,
+    packetUrl,
+    lossDraftStatus: updatedOpp.lossDraftStatus,
+    evaluation,
+    opportunity: updatedOpp,
+  });
+});
+
+app.post('/api/loss-draft/:id/schedule-inspection', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const existing = opportunityMemoryStore.get(oppId) || { id: oppId };
+
+  const scheduledDate = String(req.body?.scheduledDate || new Date().toISOString().slice(0, 10)).trim();
+  const completionPct = Number(req.body?.completionPct ?? 100);
+  const inspectorNotes = String(req.body?.notes || '').trim();
+
+  const updatedOpp = {
+    ...existing,
+    lossDraftInspectionScheduledAt: scheduledDate,
+    lossDraftInspectionPct: completionPct,
+    lossDraftStatus: completionPct >= 100 ? 'Inspection Passed' : 'Mortgage Inspection Scheduled',
+    lossDraftNotes: inspectorNotes || existing.lossDraftNotes,
+  };
+  opportunityMemoryStore.set(oppId, updatedOpp);
+
+  const evaluation = evaluateMortgageLossDraftRequirements(updatedOpp);
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    scheduledDate,
+    completionPct,
+    lossDraftStatus: updatedOpp.lossDraftStatus,
+    evaluation,
+    opportunity: updatedOpp,
+  });
+});
+
+app.post('/api/loss-draft/:id/release-check', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const existing = opportunityMemoryStore.get(oppId) || { id: oppId };
+
+  const evaluationBefore = evaluateMortgageLossDraftRequirements(existing);
+  if (!evaluationBefore.readyForRelease && !req.body?.forceOverride) {
+    return res.status(403).json({
+      success: false,
+      error: `MORTGAGE ESCROW GATE: Cannot release final mortgage escrow holdback until required Loss Draft steps are completed: ${evaluationBefore.blockers.join(' ')}`,
+      evaluation: evaluationBefore,
+    });
+  }
+
+  const endorsedAmount = Number(
+    req.body?.endorsedAmount ?? existing.lossDraftCheckAmount ?? existing.lossDraftHoldbackAmount ?? 14500
+  );
+  const checkNumber = String(req.body?.checkNumber || existing.lossDraftCheckNumber || 'CHK-ENDORSED-01').trim();
+  const nowIso = new Date().toISOString();
+
+  let qboPaymentResult: any = null;
+  if (existing.qboInvoiceId && existing.qboCustomerId) {
+    try {
+      qboPaymentResult = await recordQuickBooksReceivePayment({
+        customerId: String(existing.qboCustomerId),
+        invoiceId: String(existing.qboInvoiceId),
+        checkNumber,
+        amount: endorsedAmount,
+        memo: `Endorsed Mortgage Loss Draft Check (${existing.mortgageCompanyName || 'Mortgage Servicer'} Loan #${existing.mortgageLoanNumber || 'N/A'})`,
+      });
+    } catch (err: any) {
+      console.warn('[Loss Draft QBO ReceivePayment Note]:', err?.message || err);
+    }
+  }
+
+  const updatedOpp = {
+    ...existing,
+    lossDraftCheckNumber: checkNumber,
+    lossDraftHoldbackAmount: 0,
+    lossDraftStatus: 'Endorsed Check Released',
+    lossDraftEndorsedReceivedAt: nowIso,
+    lossDraftInspectionPct: 100,
+    acvReceivedAmount: Number(existing.acvReceivedAmount ?? 0) + endorsedAmount,
+  };
+  opportunityMemoryStore.set(oppId, updatedOpp);
+
+  const evaluation = evaluateMortgageLossDraftRequirements(updatedOpp);
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    checkNumber,
+    endorsedAmount,
+    lossDraftStatus: updatedOpp.lossDraftStatus,
+    qboPaymentId: qboPaymentResult?.paymentId || qboPaymentResult?.Id || null,
+    evaluation,
+    opportunity: updatedOpp,
+  });
+});
+
+app.get('/loss-draft/:id/packet', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const opp = opportunityMemoryStore.get(oppId);
+  if (!opp || !opp.mortgageCompanyName) {
+    return res.status(404).send('<h2>Mortgage Loss Draft Packet Not Found</h2>');
+  }
+
+  const qrDataUrl = await QRCode.toDataURL(
+    opp.lossDraftPacketUrl || `http://localhost:4000/loss-draft/${oppId}/packet`,
+    { margin: 1, width: 100 }
+  );
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Mortgage Loss Draft Endorsement Packet — Loan #${opp.mortgageLoanNumber}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f1f5f9; padding: 24px; color: #0f172a; }
+    .sheet { max-width: 760px; margin: 0 auto; background: #fff; border: 3px solid #1e293b; border-radius: 8px; padding: 28px; }
+    .hdr { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #1e293b; padding-bottom: 16px; margin-bottom: 18px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+    .box { border: 1px solid #cbd5e1; border-radius: 6px; padding: 12px; background: #f8fafc; font-size: 13px; }
+    ul { font-size: 13px; line-height: 1.7; }
+  </style>
+</head>
+<body>
+  <div class="sheet">
+    <div class="hdr">
+      <div>
+        <div style="font-size: 11px; font-weight: 800; text-transform: uppercase; color: #475569;">MORTGAGE SERVICER LOSS DRAFT SUBMISSION PACKET</div>
+        <h1 style="margin: 4px 0; font-size: 22px;">${opp.mortgageCompanyName}</h1>
+        <div style="font-size: 15px; font-weight: 700; color: #2563eb;">LOAN NO: ${opp.mortgageLoanNumber} • CHECK #${opp.lossDraftCheckNumber || 'PENDING'}</div>
+      </div>
+      <img src="${qrDataUrl}" alt="Packet QR" style="width: 84px; height: 84px;" />
+    </div>
+    <div class="grid">
+      <div class="box">
+        <div><strong>Borrower / Homeowner:</strong> ${opp.customerName || opp.name || 'Homeowner'}</div>
+        <div><strong>Property Address:</strong> ${opp.addressStreet || 'Job Site'}, ${opp.addressCity || 'San Diego'}</div>
+        <div><strong>Insurance Carrier & Claim #:</strong> ${opp.insuranceCarrier || 'State Farm'} (${opp.claimNumber || 'CLM-2026'})</div>
+      </div>
+      <div class="box">
+        <div><strong>Two-Party Check Amount:</strong> $${Number(opp.lossDraftCheckAmount || 0).toFixed(2)}</div>
+        <div><strong>Escrow Holdback Balance:</strong> $${Number(opp.lossDraftHoldbackAmount || 0).toFixed(2)}</div>
+        <div><strong>Overnight Tracking #:</strong> ${opp.lossDraftTrackingNumber || 'N/A'}</div>
+      </div>
+    </div>
+    <h3>Enclosed Loss Draft Endorsement Documents</h3>
+    <ul>
+      <li>[✓] Executed Roofing Replacement Contract & Scope of Work</li>
+      <li>[✓] Contractor IRS Form W-9 & California CSLB C-39 Roofing License</li>
+      <li>[✓] Certificate of Liability & Workers' Compensation Insurance (COI)</li>
+      <li>[✓] Insurance Adjuster Xactimate Scope & Claim Loss Summary</li>
+      <li>[✓] Borrower Authorization & Affidavit of Repairs</li>
+    </ul>
+  </div>
+</body>
+</html>`;
+
+  res.status(200).type('text/html').send(html);
+});
+
+// ==============================================================================
+// 6G. DUMPSTER / ROLL-OFF CONTAINER DISPATCH & TONNAGE RECONCILIATION (FEATURE #7)
+// ==============================================================================
+
+export interface DumpsterSizingCalculation {
+  roofSquares: number;
+  shingleLayers: number;
+  roofMaterialType: string;
+  lbsPerSquarePerLayer: number;
+  estimatedTons: number;
+  recommendedContainerSizeYd: 10 | 20 | 30 | 40;
+  includedTons: number;
+  actualTons: number;
+  overageTons: number;
+  baseHaulFee: number;
+  overageRatePerTon: number;
+  overageFeeAmount: number;
+  totalDumpsterCost: number;
+}
+
+export function calculateDumpsterSizingAndTonnage(input: {
+  roofSquares?: number;
+  shingleLayers?: number;
+  roofMaterialType?: string;
+  baseHaulFee?: number;
+  includedTons?: number;
+  overageRatePerTon?: number;
+  actualTons?: number;
+}): DumpsterSizingCalculation {
+  const roofSquares = Math.max(1, Number(input?.roofSquares ?? 28));
+  const shingleLayers = Math.max(1, Number(input?.shingleLayers ?? 1));
+  const roofMaterialType = String(input?.roofMaterialType || 'Asphalt Shingle').trim();
+  const matLower = roofMaterialType.toLowerCase();
+
+  let lbsPerSquarePerLayer = 240; // Standard architectural asphalt shingle (~240 lbs/sq)
+  if (matLower.includes('tile') || matLower.includes('concrete') || matLower.includes('clay') || matLower.includes('slate')) {
+    lbsPerSquarePerLayer = 900; // Concrete/Clay tile (~900 lbs/sq)
+  } else if (matLower.includes('shake') || matLower.includes('wood')) {
+    lbsPerSquarePerLayer = 320;
+  }
+
+  // Add 10% tear-off underlayment, nails, flashing & ridge waste factor
+  const rawTons = (roofSquares * shingleLayers * lbsPerSquarePerLayer * 1.1) / 2000;
+  const estimatedTons = Math.round(rawTons * 100) / 100;
+
+  let recommendedContainerSizeYd: 10 | 20 | 30 | 40 = 20;
+  if (estimatedTons <= 2.5) {
+    recommendedContainerSizeYd = 10;
+  } else if (estimatedTons <= 4.5) {
+    recommendedContainerSizeYd = 20;
+  } else if (estimatedTons <= 7.0) {
+    recommendedContainerSizeYd = 30;
+  } else {
+    recommendedContainerSizeYd = 40;
+  }
+
+  const baseHaulFee = Math.round(Number(input?.baseHaulFee ?? (recommendedContainerSizeYd >= 30 ? 550 : 450)) * 100) / 100;
+  const includedTons = Math.round(Number(input?.includedTons ?? (recommendedContainerSizeYd >= 30 ? 4.0 : 3.0)) * 100) / 100;
+  const overageRatePerTon = Math.round(Number(input?.overageRatePerTon ?? 95) * 100) / 100;
+  const actualTons = Math.round(Number(input?.actualTons ?? estimatedTons) * 100) / 100;
+
+  const overageTons = Math.round(Math.max(0, actualTons - includedTons) * 100) / 100;
+  const overageFeeAmount = Math.round(overageTons * overageRatePerTon * 100) / 100;
+  const totalDumpsterCost = Math.round((baseHaulFee + overageFeeAmount) * 100) / 100;
+
+  return {
+    roofSquares,
+    shingleLayers,
+    roofMaterialType,
+    lbsPerSquarePerLayer,
+    estimatedTons,
+    recommendedContainerSizeYd,
+    includedTons,
+    actualTons,
+    overageTons,
+    baseHaulFee,
+    overageRatePerTon,
+    overageFeeAmount,
+    totalDumpsterCost,
+  };
+}
+
+app.get('/api/dumpster/:id/status', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const opp = opportunityMemoryStore.get(oppId) || { id: oppId };
+
+  const sizing = calculateDumpsterSizingAndTonnage({
+    roofSquares: opp.roofSquares,
+    shingleLayers: opp.shingleLayers,
+    roofMaterialType: opp.roofMaterialType || opp.shingleManufacturer,
+    baseHaulFee: opp.dumpsterBaseHaulFee,
+    includedTons: opp.dumpsterIncludedTons,
+    overageRatePerTon: opp.dumpsterOverageRatePerTon,
+    actualTons: opp.dumpsterActualTons || undefined,
+  });
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    dumpsterStatus: opp.dumpsterStatus || 'Not Scheduled',
+    dumpsterHaulerName: opp.dumpsterHaulerName || 'EDCO Waste & Recycling Services',
+    dumpsterContainerSizeYd: opp.dumpsterContainerSizeYd || sizing.recommendedContainerSizeYd,
+    dumpsterTicketNumber: opp.dumpsterTicketNumber || null,
+    dumpsterQboBillId: opp.dumpsterQboBillId || null,
+    sizing,
+  });
+});
+
+app.post('/api/dumpster/:id/dispatch', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const existing = opportunityMemoryStore.get(oppId) || { id: oppId };
+
+  const sizing = calculateDumpsterSizingAndTonnage({
+    roofSquares: req.body?.roofSquares ?? existing.roofSquares,
+    shingleLayers: req.body?.shingleLayers ?? existing.shingleLayers,
+    roofMaterialType: req.body?.roofMaterialType ?? existing.roofMaterialType,
+  });
+
+  const haulerName = String(req.body?.haulerName || existing.dumpsterHaulerName || 'EDCO Waste & Recycling Services').trim();
+  const haulerPhone = String(req.body?.haulerPhone || existing.dumpsterHaulerPhone || '+16195550620').trim();
+  const containerSizeYd = Number(req.body?.containerSizeYd || sizing.recommendedContainerSizeYd);
+  const deliveryDate = String(req.body?.deliveryDate || existing.installDate || new Date().toISOString().slice(0, 10)).trim();
+  const placementNotes = String(req.body?.placementNotes || 'Place on driveway left side on 2x4 wood planks to protect concrete.').trim();
+
+  const updatedOpp = {
+    ...existing,
+    dumpsterHaulerName: haulerName,
+    dumpsterHaulerPhone: haulerPhone,
+    dumpsterContainerSizeYd: containerSizeYd,
+    dumpsterEstimatedTons: sizing.estimatedTons,
+    dumpsterIncludedTons: sizing.includedTons,
+    dumpsterBaseHaulFee: sizing.baseHaulFee,
+    dumpsterOverageRatePerTon: sizing.overageRatePerTon,
+    dumpsterStatus: 'Dispatched - On Site',
+    dumpsterDispatchedAt: new Date().toISOString(),
+  };
+  opportunityMemoryStore.set(oppId, updatedOpp);
+
+  console.log(
+    `[Dumpster Dispatch SMS] [Dev Mode] Sent to Hauler (${haulerPhone}):\n` +
+      `🚛 ROLL-OFF DISPATCH ORDER: ${containerSizeYd}-Yard Container\n` +
+      `• Delivery Date: ${deliveryDate}\n` +
+      `• Est. Tear-Off Weight: ${sizing.estimatedTons} Tons (${sizing.roofSquares} SQ)\n` +
+      `• Placement: ${placementNotes}`
+  );
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    haulerName,
+    containerSizeYd,
+    deliveryDate,
+    estimatedTons: sizing.estimatedTons,
+    dumpsterStatus: updatedOpp.dumpsterStatus,
+    sizing,
+    opportunity: updatedOpp,
+  });
+});
+
+app.post('/api/dumpster/:id/reconcile-ticket', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const existing = opportunityMemoryStore.get(oppId) || { id: oppId };
+
+  const ticketNumber = String(req.body?.ticketNumber || `TKT-${Date.now().toString().slice(-6)}`).trim();
+  const haulerName = String(req.body?.haulerName || existing.dumpsterHaulerName || 'EDCO Waste & Recycling Services').trim();
+
+  const sizing = calculateDumpsterSizingAndTonnage({
+    roofSquares: existing.roofSquares,
+    shingleLayers: existing.shingleLayers,
+    roofMaterialType: existing.roofMaterialType,
+    baseHaulFee: req.body?.baseHaulFee ?? existing.dumpsterBaseHaulFee,
+    includedTons: req.body?.includedTons ?? existing.dumpsterIncludedTons,
+    overageRatePerTon: req.body?.overageRatePerTon ?? existing.dumpsterOverageRatePerTon,
+    actualTons: req.body?.actualTons,
+  });
+
+  // Create QBO A/P Bill under COGS Account #62 (Cost of Goods Sold - Dumpster & Disposal)
+  const vendor = await findOrCreateQuickBooksVendor({
+    displayName: haulerName,
+    vendor1099: false,
+  });
+
+  const qboBill = await createQuickBooksVendorBill({
+    vendorId: vendor.vendorId,
+    vendorName: vendor.displayName,
+    docNumber: ticketNumber,
+    amount: sizing.totalDumpsterCost,
+    category: 'dumpster',
+    memo: `${existing.dumpsterContainerSizeYd || sizing.recommendedContainerSizeYd}YD Roll-Off Haul & Landfill Ticket #${ticketNumber} (${sizing.actualTons} Tons @ $${sizing.baseHaulFee} base + $${sizing.overageFeeAmount} overweight fee)`,
+    customerId: existing.qboCustomerId ? String(existing.qboCustomerId) : undefined,
+  });
+
+  const updatedOpp: any = {
+    ...existing,
+    dumpsterHaulerName: haulerName,
+    dumpsterTicketNumber: ticketNumber,
+    dumpsterActualTons: sizing.actualTons,
+    dumpsterIncludedTons: sizing.includedTons,
+    dumpsterBaseHaulFee: sizing.baseHaulFee,
+    dumpsterOverageRatePerTon: sizing.overageRatePerTon,
+    dumpsterOverageFeeAmount: sizing.overageFeeAmount,
+    dumpsterTotalCost: sizing.totalDumpsterCost,
+    dumpsterQboBillId: qboBill.billId,
+    dumpsterStatus: 'Picked Up & Reconciled',
+    dumpsterPickedUpAt: new Date().toISOString(),
+    dumpsterExpense: sizing.totalDumpsterCost,
+  };
+
+  const costing = calculateJobCostingAndCommission(updatedOpp);
+  updatedOpp.totalJobCost = costing.totalJobCost;
+  updatedOpp.grossProfit = costing.grossProfit;
+  updatedOpp.profitMarginPct = costing.grossMarginPercent;
+  opportunityMemoryStore.set(oppId, updatedOpp);
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    ticketNumber,
+    haulerName,
+    actualTons: sizing.actualTons,
+    includedTons: sizing.includedTons,
+    overageTons: sizing.overageTons,
+    baseHaulFee: sizing.baseHaulFee,
+    overageFeeAmount: sizing.overageFeeAmount,
+    totalDumpsterCost: sizing.totalDumpsterCost,
+    qboBillId: qboBill.billId,
+    qboVendorId: vendor.vendorId,
+    costing,
+    opportunity: updatedOpp,
+  });
+});
+
+// ==============================================================================
+// 6H. STORM SWATH CANVASSING & CLOVERLEAF NEIGHBORHOOD TRACKER (FEATURE #8)
+// ==============================================================================
+
+const canvassingPinStore = new Map<string, any>();
+
+export interface CanvassCloverleafSummary {
+  parentOpportunityId: string;
+  totalPins: number;
+  inspectionBookedCount: number;
+  notHomeCount: number;
+  followUpCount: number;
+  noDamageCount: number;
+  convertedCount: number;
+  conversionRatePct: number;
+  pins: any[];
+}
+
+export function evaluateCanvassCloverleafMetrics(parentOpportunityId: string): CanvassCloverleafSummary {
+  const pins = Array.from(canvassingPinStore.values()).filter(
+    (p) => p.parentOpportunityId === parentOpportunityId
+  );
+
+  const totalPins = pins.length;
+  const inspectionBookedCount = pins.filter((p) => p.pinStatus === 'Inspection Booked').length;
+  const notHomeCount = pins.filter((p) => p.pinStatus === 'Not Home').length;
+  const followUpCount = pins.filter((p) => p.pinStatus === 'Follow-Up').length;
+  const noDamageCount = pins.filter((p) => p.pinStatus === 'No Damage').length;
+  const convertedCount = pins.filter((p) => Boolean(p.convertedOpportunityId)).length;
+  const conversionRatePct =
+    totalPins > 0 ? Math.round(((inspectionBookedCount + convertedCount) / totalPins) * 10000) / 100 : 0;
+
+  return {
+    parentOpportunityId,
+    totalPins,
+    inspectionBookedCount,
+    notHomeCount,
+    followUpCount,
+    noDamageCount,
+    convertedCount,
+    conversionRatePct,
+    pins,
+  };
+}
+
+app.get('/api/canvassing/:id/pins', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const metrics = evaluateCanvassCloverleafMetrics(oppId);
+  res.status(200).json({
+    success: true,
+    ...metrics,
+  });
+});
+
+app.post('/api/canvassing/:id/pin', async (req: Request, res: Response) => {
+  const parentOpportunityId = req.params.id;
+  const parentOpp = opportunityMemoryStore.get(parentOpportunityId) || { id: parentOpportunityId };
+
+  const pinId = String(req.body?.id || `pin-${Date.now()}-${Math.floor(Math.random() * 1000)}`);
+  const addressStreet = String(req.body?.addressStreet || '4824 Kensington Dr').trim();
+  const addressCity = String(req.body?.addressCity || parentOpp.addressCity || 'San Diego').trim();
+  const addressState = String(req.body?.addressState || parentOpp.addressState || 'CA').trim();
+  const addressPostcode = String(req.body?.addressPostcode || parentOpp.addressPostcode || '92116').trim();
+  const homeownerName = String(req.body?.homeownerName || 'Neighbor Homeowner').trim();
+  const homeownerPhone = String(req.body?.homeownerPhone || '').trim();
+  const pinStatus = String(req.body?.pinStatus || 'Not Home').trim();
+  const repName = String(req.body?.repName || parentOpp.salesRepName || 'Jake Morrison').trim();
+  const stormDate = String(req.body?.stormDate || parentOpp.canvassStormDate || '2026-11-01').trim();
+  const hailSizeInches = Number(req.body?.hailSizeInches ?? parentOpp.canvassHailSizeInches ?? 1.25);
+  const windSpeedMph = Number(req.body?.windSpeedMph ?? parentOpp.canvassWindSpeedMph ?? 58);
+  const notes = String(req.body?.notes || '').trim();
+
+  const pinRecord = {
+    id: pinId,
+    parentOpportunityId,
+    convertedOpportunityId: null,
+    addressStreet,
+    addressCity,
+    addressState,
+    addressPostcode,
+    homeownerName,
+    homeownerPhone,
+    pinStatus,
+    repName,
+    stormDate,
+    hailSizeInches,
+    windSpeedMph,
+    notes,
+    createdAt: new Date().toISOString(),
+  };
+
+  canvassingPinStore.set(pinId, pinRecord);
+
+  const metrics = evaluateCanvassCloverleafMetrics(parentOpportunityId);
+  parentOpp.canvassCloverleafCount = metrics.totalPins;
+  opportunityMemoryStore.set(parentOpportunityId, parentOpp);
+
+  res.status(200).json({
+    success: true,
+    pin: pinRecord,
+    metrics,
+  });
+});
+
+app.post('/api/canvassing/pins/:pinId/convert', async (req: Request, res: Response) => {
+  const pinId = req.params.pinId;
+  const pin = canvassingPinStore.get(pinId);
+  if (!pin) {
+    return res.status(404).json({ success: false, error: `Canvassing pin ${pinId} not found.` });
+  }
+
+  const newOppId = `opp-canvass-${pinId}`;
+  const newOpp = {
+    id: newOppId,
+    name: `${pin.homeownerName} — ${pin.addressStreet}`,
+    customerName: pin.homeownerName,
+    homeownerPhone: pin.homeownerPhone || '+16195550911',
+    addressStreet: pin.addressStreet,
+    addressCity: pin.addressCity,
+    addressState: pin.addressState,
+    addressPostcode: pin.addressPostcode,
+    stage: 'NEW_LEAD',
+    canvassPinStatus: 'Converted to Opportunity',
+    canvassStormDate: pin.stormDate,
+    canvassHailSizeInches: pin.hailSizeInches,
+    canvassWindSpeedMph: pin.windSpeedMph,
+    canvassRepName: pin.repName,
+    canvassParentOpportunityId: pin.parentOpportunityId,
+    salesRepName: pin.repName,
+    createdAt: new Date().toISOString(),
+  };
+
+  opportunityMemoryStore.set(newOppId, newOpp);
+  pin.pinStatus = 'Inspection Booked';
+  pin.convertedOpportunityId = newOppId;
+  canvassingPinStore.set(pinId, pin);
+
+  console.log(
+    `[Canvassing Lead SMS] [Dev Mode] Sent to Neighbor (${newOpp.homeownerPhone}):\n` +
+      `🏠 FREE STORM ROOF INSPECTION CONFIRMED: ${pin.addressStreet}\n` +
+      `Rep: ${pin.repName} • Storm Event: ${pin.stormDate} (${pin.hailSizeInches}" Hail / ${pin.windSpeedMph} MPH Wind)`
+  );
+
+  const metrics = evaluateCanvassCloverleafMetrics(pin.parentOpportunityId);
+
+  res.status(200).json({
+    success: true,
+    pin,
+    convertedOpportunity: newOpp,
+    metrics,
+  });
+});
+
+// ==============================================================================
+// 6I. POST-COMPLETION GOOGLE REVIEW GATE & $250 REFERRAL BOUNTY ENGINE (FEATURE #9)
+// ==============================================================================
+
+export interface ReviewSentimentRouting {
+  rating: number;
+  isPositive: boolean;
+  routeTo: 'GOOGLE_BUSINESS_PROFILE' | 'INTERNAL_SERVICE_RECOVERY';
+  googleReviewUrl: string | null;
+  requiresManagerEscalation: boolean;
+}
+
+export function evaluateReviewSentimentAndRouting(ratingInput: number, comment?: string): ReviewSentimentRouting {
+  const rating = Math.min(5, Math.max(1, Math.round(Number(ratingInput || 5))));
+  const isPositive = rating >= 4;
+  const googleReviewUrl = isPositive
+    ? process.env.GOOGLE_REVIEW_URL || 'https://g.page/r/SanDiegoPremierRoofing/review'
+    : null;
+
+  return {
+    rating,
+    isPositive,
+    routeTo: isPositive ? 'GOOGLE_BUSINESS_PROFILE' : 'INTERNAL_SERVICE_RECOVERY',
+    googleReviewUrl,
+    requiresManagerEscalation: !isPositive,
+  };
+}
+
+app.get('/api/reviews/:id/status', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const opp = opportunityMemoryStore.get(oppId) || { id: oppId };
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    reviewRequestStatus: opp.reviewRequestStatus || 'Not Sent',
+    reviewSentimentScore: opp.reviewSentimentScore ?? null,
+    reviewComment: opp.reviewComment || null,
+    reviewGoogleRedirected: Boolean(opp.reviewGoogleRedirected),
+    referralCode: opp.referralCode || `REF-${oppId.slice(-6).toUpperCase()}`,
+    referralCount: Number(opp.referralCount ?? 0),
+    referralBountyEarned: Number(opp.referralBountyEarned ?? 0),
+    referralBountyPaid: Number(opp.referralBountyPaid ?? 0),
+    referralLastQboBillId: opp.referralLastQboBillId || null,
+  });
+});
+
+app.post('/api/reviews/:id/send-request', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const existing = opportunityMemoryStore.get(oppId) || { id: oppId };
+
+  const referralCode = String(existing.referralCode || `REF-${oppId.slice(-6).toUpperCase()}`);
+  const feedbackUrl = `${process.env.PUBLIC_BASE_URL || 'http://localhost:4000'}/feedback/${oppId}`;
+  const updatedOpp = {
+    ...existing,
+    referralCode,
+    reviewRequestStatus: 'Review Link Sent',
+    reviewRequestedAt: new Date().toISOString(),
+  };
+  opportunityMemoryStore.set(oppId, updatedOpp);
+
+  const phone = updatedOpp.homeownerPhone || updatedOpp.customerPhone || '+16195550199';
+  console.log(
+    `[Review & Referral SMS] [Dev Mode] Sent to Homeowner (${phone}):\n` +
+      `⭐ Thank you for trusting us with your new roof! Rate your experience in 10 seconds: ${feedbackUrl}\n` +
+      `💵 Share your Referral Code (${referralCode}) with a neighbor — you earn a $250 Referral Bounty for every completed roof!`
+  );
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    reviewRequestStatus: updatedOpp.reviewRequestStatus,
+    referralCode,
+    feedbackUrl,
+    opportunity: updatedOpp,
+  });
+});
+
+app.post('/api/reviews/:id/submit-rating', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const existing = opportunityMemoryStore.get(oppId) || { id: oppId };
+
+  const rating = Number(req.body?.rating ?? 5);
+  const comment = String(req.body?.comment || '').trim();
+  const routing = evaluateReviewSentimentAndRouting(rating, comment);
+
+  const updatedOpp = {
+    ...existing,
+    reviewSentimentScore: routing.rating,
+    reviewComment: comment,
+    reviewGoogleRedirected: routing.isPositive,
+    reviewRequestStatus: routing.isPositive ? '5-Star Google Redirected' : 'Escalated to GM Service Recovery',
+    reviewSubmittedAt: new Date().toISOString(),
+  };
+  opportunityMemoryStore.set(oppId, updatedOpp);
+
+  if (routing.requiresManagerEscalation) {
+    console.log(
+      `[GM Service Recovery Alert SMS] [Dev Mode] Priority Escalation for ${oppId}:\n` +
+        `⚠️ ${routing.rating}-Star Private Feedback received ("${comment}"). Contact homeowner immediately before public posting.`
+    );
+  }
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    routing,
+    opportunity: updatedOpp,
+  });
+});
+
+app.post('/api/reviews/:id/record-referral', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const existing = opportunityMemoryStore.get(oppId) || { id: oppId };
+
+  const referredNeighborName = String(req.body?.referredNeighborName || 'Neighbor Referral').trim();
+  const referredAddress = String(req.body?.referredAddress || '4830 Kensington Dr').trim();
+  const bountyAmount = Number(req.body?.bountyAmount ?? 250);
+  const autoPayViaQbo = req.body?.autoPayViaQbo !== false;
+
+  const newReferralCount = Number(existing.referralCount ?? 0) + 1;
+  const newBountyEarned = Math.round((Number(existing.referralBountyEarned ?? 0) + bountyAmount) * 100) / 100;
+
+  let qboBillId: string | null = existing.referralLastQboBillId || null;
+  let newBountyPaid = Number(existing.referralBountyPaid ?? 0);
+
+  if (autoPayViaQbo) {
+    const homeownerVendorName = `${existing.customerName || existing.name || 'Homeowner'} (Referral Bounty)`;
+    const vendor = await findOrCreateQuickBooksVendor({
+      displayName: homeownerVendorName,
+      vendor1099: false,
+    });
+    const bill = await createQuickBooksVendorBill({
+      vendorId: vendor.vendorId,
+      vendorName: vendor.displayName,
+      docNumber: `REF-${oppId.slice(-4).toUpperCase()}-${newReferralCount}`,
+      amount: bountyAmount,
+      category: 'other',
+      memo: `Customer Referral Bounty Payout — Referred ${referredNeighborName} (${referredAddress})`,
+    });
+    qboBillId = bill.billId;
+    newBountyPaid = Math.round((newBountyPaid + bountyAmount) * 100) / 100;
+  }
+
+  const updatedOpp = {
+    ...existing,
+    referralCount: newReferralCount,
+    referralBountyEarned: newBountyEarned,
+    referralBountyPaid: newBountyPaid,
+    referralLastQboBillId: qboBillId,
+  };
+  opportunityMemoryStore.set(oppId, updatedOpp);
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    referredNeighborName,
+    referredAddress,
+    bountyAmount,
+    referralCount: newReferralCount,
+    referralBountyEarned: newBountyEarned,
+    referralBountyPaid: newBountyPaid,
+    qboBillId,
+    opportunity: updatedOpp,
+  });
+});
+
+// ==============================================================================
+// 6J. FINAL QC WALKTHROUGH, MAGNETIC NAIL SWEEP & PUNCH-LIST GATE (FEATURE #10)
+// ==============================================================================
+
+export interface FinalQcComplianceEvaluation {
+  completedCount: number;
+  totalCount: number;
+  allChecklistItemsVerified: boolean;
+  homeownerSignedOff: boolean;
+  eligibleForFinalCrewRetainageRelease: boolean;
+  checklist: {
+    qcMagneticSweepVerified: boolean;
+    qcGutterCleanoutVerified: boolean;
+    qcPipeBootFlashingVerified: boolean;
+    qcAtticPenetrationChecked: boolean;
+    qcDrivewayDebrisCleared: boolean;
+  };
+  blockers: string[];
+}
+
+export function evaluateFinalQcWalkthroughCompliance(opp: any): FinalQcComplianceEvaluation {
+  const checklist = {
+    qcMagneticSweepVerified: Boolean(opp?.qcMagneticSweepVerified),
+    qcGutterCleanoutVerified: Boolean(opp?.qcGutterCleanoutVerified),
+    qcPipeBootFlashingVerified: Boolean(opp?.qcPipeBootFlashingVerified),
+    qcAtticPenetrationChecked: Boolean(opp?.qcAtticPenetrationChecked),
+    qcDrivewayDebrisCleared: Boolean(opp?.qcDrivewayDebrisCleared),
+  };
+
+  const items = Object.values(checklist);
+  const completedCount = items.filter(Boolean).length;
+  const allChecklistItemsVerified = completedCount === 5;
+  const homeownerSignedOff = Boolean(opp?.qcHomeownerSignedBy && opp?.qcHomeownerSignedAt);
+
+  const blockers: string[] = [];
+  if (!checklist.qcMagneticSweepVerified) {
+    blockers.push('3-Pass Magnetic Nail Sweep of driveway, lawn, and perimeter flowerbeds must be verified.');
+  }
+  if (!checklist.qcGutterCleanoutVerified) {
+    blockers.push('Gutter and downspout granule/nail cleanout must be verified.');
+  }
+  if (!checklist.qcPipeBootFlashingVerified) {
+    blockers.push('Pipe boots, step flashings, and chimney/wall counter-flashings must be verified.');
+  }
+  if (!checklist.qcAtticPenetrationChecked) {
+    blockers.push('Attic deck penetrations and HVAC exhaust vent connections must be checked.');
+  }
+  if (!checklist.qcDrivewayDebrisCleared) {
+    blockers.push('Driveway roll-off container removal and debris sweep must be verified.');
+  }
+
+  return {
+    completedCount,
+    totalCount: 5,
+    allChecklistItemsVerified,
+    homeownerSignedOff,
+    eligibleForFinalCrewRetainageRelease: allChecklistItemsVerified && homeownerSignedOff,
+    checklist,
+    blockers,
+  };
+}
+
+app.get('/api/qc-walkthrough/:id/status', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const opp = opportunityMemoryStore.get(oppId) || { id: oppId };
+  const compliance = evaluateFinalQcWalkthroughCompliance(opp);
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    qcWalkthroughStatus: opp.qcWalkthroughStatus || 'Pending Inspection',
+    qcSuperintendentName: opp.qcSuperintendentName || null,
+    qcPunchListNotes: opp.qcPunchListNotes || null,
+    qcHomeownerSignedBy: opp.qcHomeownerSignedBy || null,
+    qcHomeownerSignedAt: opp.qcHomeownerSignedAt || null,
+    compliance,
+  });
+});
+
+app.post('/api/qc-walkthrough/:id/verify-checklist', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const existing = opportunityMemoryStore.get(oppId) || { id: oppId };
+
+  const updatedOpp = {
+    ...existing,
+    qcMagneticSweepVerified:
+      req.body?.qcMagneticSweepVerified !== undefined
+        ? Boolean(req.body.qcMagneticSweepVerified)
+        : Boolean(existing.qcMagneticSweepVerified),
+    qcGutterCleanoutVerified:
+      req.body?.qcGutterCleanoutVerified !== undefined
+        ? Boolean(req.body.qcGutterCleanoutVerified)
+        : Boolean(existing.qcGutterCleanoutVerified),
+    qcPipeBootFlashingVerified:
+      req.body?.qcPipeBootFlashingVerified !== undefined
+        ? Boolean(req.body.qcPipeBootFlashingVerified)
+        : Boolean(existing.qcPipeBootFlashingVerified),
+    qcAtticPenetrationChecked:
+      req.body?.qcAtticPenetrationChecked !== undefined
+        ? Boolean(req.body.qcAtticPenetrationChecked)
+        : Boolean(existing.qcAtticPenetrationChecked),
+    qcDrivewayDebrisCleared:
+      req.body?.qcDrivewayDebrisCleared !== undefined
+        ? Boolean(req.body.qcDrivewayDebrisCleared)
+        : Boolean(existing.qcDrivewayDebrisCleared),
+    qcSuperintendentName: String(req.body?.qcSuperintendentName || existing.qcSuperintendentName || 'Carlos Mendez (Field Supt.)').trim(),
+    qcPunchListNotes: String(req.body?.qcPunchListNotes ?? existing.qcPunchListNotes ?? '').trim(),
+  };
+
+  const compliance = evaluateFinalQcWalkthroughCompliance(updatedOpp);
+  updatedOpp.qcWalkthroughStatus = compliance.allChecklistItemsVerified
+    ? 'QC Verified — Ready for Homeowner Sign-Off'
+    : `In Progress (${compliance.completedCount}/5 Verified)`;
+  opportunityMemoryStore.set(oppId, updatedOpp);
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    qcWalkthroughStatus: updatedOpp.qcWalkthroughStatus,
+    compliance,
+    opportunity: updatedOpp,
+  });
+});
+
+app.post('/api/qc-walkthrough/:id/sign-off', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const existing = opportunityMemoryStore.get(oppId) || { id: oppId };
+
+  const complianceBefore = evaluateFinalQcWalkthroughCompliance(existing);
+  if (!complianceBefore.allChecklistItemsVerified) {
+    return res.status(403).json({
+      success: false,
+      error: `FINAL QC PUNCH-LIST GATE: Cannot complete Final Walkthrough Sign-Off or release crew retainage until all 5 QC checks are verified. Missing: ${complianceBefore.blockers.join(' ')}`,
+      compliance: complianceBefore,
+    });
+  }
+
+  const signedBy = String(req.body?.signedBy || existing.customerName || 'Homeowner').trim();
+  const signedAt = new Date().toISOString();
+
+  const updatedOpp = {
+    ...existing,
+    qcHomeownerSignedBy: signedBy,
+    qcHomeownerSignedAt: signedAt,
+    qcWalkthroughStatus: 'Signed Off & Complete',
+  };
+  opportunityMemoryStore.set(oppId, updatedOpp);
+
+  const compliance = evaluateFinalQcWalkthroughCompliance(updatedOpp);
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    qcWalkthroughStatus: updatedOpp.qcWalkthroughStatus,
+    signedBy,
+    signedAt,
+    compliance,
+    opportunity: updatedOpp,
+  });
 });
 
 // ==============================================================================

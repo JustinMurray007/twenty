@@ -606,6 +606,110 @@ ALTER TABLE "opportunity"
     ADD COLUMN IF NOT EXISTS "inspectionNotes" TEXT,
     ADD COLUMN IF NOT EXISTS "permitCardPdfUrl" TEXT;
 
+-- ==============================================================================
+-- 12. MORTGAGE COMPANY / LOSS DRAFT ENDORSEMENT TRACKER COLUMNS
+-- ==============================================================================
+ALTER TABLE "opportunity"
+    ADD COLUMN IF NOT EXISTS "mortgageCompanyName" VARCHAR(150),
+    ADD COLUMN IF NOT EXISTS "mortgageLoanNumber" VARCHAR(100),
+    ADD COLUMN IF NOT EXISTS "lossDraftDepartmentPhone" VARCHAR(50),
+    ADD COLUMN IF NOT EXISTS "lossDraftCheckNumber" VARCHAR(100),
+    ADD COLUMN IF NOT EXISTS "lossDraftCheckAmount" NUMERIC(12,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS "lossDraftHoldbackAmount" NUMERIC(12,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS "lossDraftTrackingNumber" VARCHAR(100),
+    ADD COLUMN IF NOT EXISTS "lossDraftStatus" VARCHAR(80) DEFAULT 'Not Required',
+    ADD COLUMN IF NOT EXISTS "lossDraftPacketGeneratedAt" TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS "lossDraftPacketUrl" TEXT,
+    ADD COLUMN IF NOT EXISTS "lossDraftInspectionScheduledAt" TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS "lossDraftInspectionPct" INTEGER DEFAULT 100,
+    ADD COLUMN IF NOT EXISTS "lossDraftEndorsedReceivedAt" TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS "lossDraftNotes" TEXT;
+
+-- ==============================================================================
+-- 13. DUMPSTER / ROLL-OFF CONTAINER DISPATCH & OVERWEIGHT TONNAGE COLUMNS
+-- ==============================================================================
+ALTER TABLE "opportunity"
+    ADD COLUMN IF NOT EXISTS "dumpsterHaulerName" VARCHAR(150),
+    ADD COLUMN IF NOT EXISTS "dumpsterHaulerPhone" VARCHAR(50),
+    ADD COLUMN IF NOT EXISTS "dumpsterContainerSizeYd" INTEGER DEFAULT 20,
+    ADD COLUMN IF NOT EXISTS "dumpsterEstimatedTons" NUMERIC(8,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS "dumpsterIncludedTons" NUMERIC(8,2) DEFAULT 3.00,
+    ADD COLUMN IF NOT EXISTS "dumpsterActualTons" NUMERIC(8,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS "dumpsterBaseHaulFee" NUMERIC(10,2) DEFAULT 450.00,
+    ADD COLUMN IF NOT EXISTS "dumpsterOverageRatePerTon" NUMERIC(10,2) DEFAULT 95.00,
+    ADD COLUMN IF NOT EXISTS "dumpsterOverageFeeAmount" NUMERIC(10,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS "dumpsterTotalCost" NUMERIC(10,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS "dumpsterTicketNumber" VARCHAR(100),
+    ADD COLUMN IF NOT EXISTS "dumpsterQboBillId" VARCHAR(100),
+    ADD COLUMN IF NOT EXISTS "dumpsterStatus" VARCHAR(60) DEFAULT 'Not Scheduled',
+    ADD COLUMN IF NOT EXISTS "dumpsterDispatchedAt" TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS "dumpsterPickedUpAt" TIMESTAMPTZ;
+
+-- ==============================================================================
+-- 14. STORM SWATH CANVASSING & CLOVERLEAF NEIGHBORHOOD TRACKER
+-- ==============================================================================
+ALTER TABLE "opportunity"
+    ADD COLUMN IF NOT EXISTS "canvassPinStatus" VARCHAR(60),
+    ADD COLUMN IF NOT EXISTS "canvassStormDate" DATE,
+    ADD COLUMN IF NOT EXISTS "canvassHailSizeInches" NUMERIC(5,2),
+    ADD COLUMN IF NOT EXISTS "canvassWindSpeedMph" INTEGER,
+    ADD COLUMN IF NOT EXISTS "canvassRepName" VARCHAR(150),
+    ADD COLUMN IF NOT EXISTS "canvassParentOpportunityId" VARCHAR(100),
+    ADD COLUMN IF NOT EXISTS "canvassCloverleafCount" INTEGER DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS "canvassNeighborsNotifiedAt" TIMESTAMPTZ;
+
+CREATE TABLE IF NOT EXISTS "canvassing_pin" (
+    "id" VARCHAR(100) PRIMARY KEY,
+    "parentOpportunityId" VARCHAR(100),
+    "convertedOpportunityId" VARCHAR(100),
+    "addressStreet" VARCHAR(255) NOT NULL,
+    "addressCity" VARCHAR(100),
+    "addressState" VARCHAR(50),
+    "addressPostcode" VARCHAR(20),
+    "homeownerName" VARCHAR(150),
+    "homeownerPhone" VARCHAR(50),
+    "pinStatus" VARCHAR(60) DEFAULT 'Not Home',
+    "repName" VARCHAR(150),
+    "stormDate" DATE,
+    "hailSizeInches" NUMERIC(5,2),
+    "windSpeedMph" INTEGER,
+    "notes" TEXT,
+    "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+    "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ==============================================================================
+-- 15. POST-COMPLETION GOOGLE REVIEW GATE & $250 REFERRAL BOUNTY COLUMNS
+-- ==============================================================================
+ALTER TABLE "opportunity"
+    ADD COLUMN IF NOT EXISTS "reviewRequestStatus" VARCHAR(60) DEFAULT 'Not Sent',
+    ADD COLUMN IF NOT EXISTS "reviewSentimentScore" INTEGER,
+    ADD COLUMN IF NOT EXISTS "reviewComment" TEXT,
+    ADD COLUMN IF NOT EXISTS "reviewGoogleRedirected" BOOLEAN DEFAULT false,
+    ADD COLUMN IF NOT EXISTS "reviewRequestedAt" TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS "reviewSubmittedAt" TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS "referralCode" VARCHAR(60),
+    ADD COLUMN IF NOT EXISTS "referredByOpportunityId" VARCHAR(100),
+    ADD COLUMN IF NOT EXISTS "referralCount" INTEGER DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS "referralBountyEarned" NUMERIC(10,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS "referralBountyPaid" NUMERIC(10,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS "referralLastQboBillId" VARCHAR(100);
+
+-- ==============================================================================
+-- 16. FINAL QC WALKTHROUGH, MAGNETIC NAIL SWEEP & PUNCH-LIST GATE COLUMNS
+-- ==============================================================================
+ALTER TABLE "opportunity"
+    ADD COLUMN IF NOT EXISTS "qcMagneticSweepVerified" BOOLEAN DEFAULT false,
+    ADD COLUMN IF NOT EXISTS "qcGutterCleanoutVerified" BOOLEAN DEFAULT false,
+    ADD COLUMN IF NOT EXISTS "qcPipeBootFlashingVerified" BOOLEAN DEFAULT false,
+    ADD COLUMN IF NOT EXISTS "qcAtticPenetrationChecked" BOOLEAN DEFAULT false,
+    ADD COLUMN IF NOT EXISTS "qcDrivewayDebrisCleared" BOOLEAN DEFAULT false,
+    ADD COLUMN IF NOT EXISTS "qcPunchListNotes" TEXT,
+    ADD COLUMN IF NOT EXISTS "qcSuperintendentName" VARCHAR(150),
+    ADD COLUMN IF NOT EXISTS "qcWalkthroughStatus" VARCHAR(60) DEFAULT 'Pending Inspection',
+    ADD COLUMN IF NOT EXISTS "qcHomeownerSignedBy" VARCHAR(150),
+    ADD COLUMN IF NOT EXISTS "qcHomeownerSignedAt" TIMESTAMPTZ;
+
 -- Trigger notification confirmation
 SELECT 'Roofing schema, production routing, and real-time profitability triggers successfully compiled.' AS status;
 

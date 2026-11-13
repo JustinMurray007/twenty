@@ -61,6 +61,11 @@ module.exports = {
   resolveManufacturerWarrantyProgram: service.resolveManufacturerWarrantyProgram,
   evaluateWarrantyRegistrationEligibility: service.evaluateWarrantyRegistrationEligibility,
   evaluatePermitInspectionCompliance: service.evaluatePermitInspectionCompliance,
+  evaluateMortgageLossDraftRequirements: service.evaluateMortgageLossDraftRequirements,
+  calculateDumpsterSizingAndTonnage: service.calculateDumpsterSizingAndTonnage,
+  evaluateCanvassCloverleafMetrics: service.evaluateCanvassCloverleafMetrics,
+  evaluateReviewSentimentAndRouting: service.evaluateReviewSentimentAndRouting,
+  evaluateFinalQcWalkthroughCompliance: service.evaluateFinalQcWalkthroughCompliance,
 };
 
 
