@@ -66,6 +66,11 @@ module.exports = {
   evaluateCanvassCloverleafMetrics: service.evaluateCanvassCloverleafMetrics,
   evaluateReviewSentimentAndRouting: service.evaluateReviewSentimentAndRouting,
   evaluateFinalQcWalkthroughCompliance: service.evaluateFinalQcWalkthroughCompliance,
+  evaluateHoaArcCompliance: service.evaluateHoaArcCompliance,
+  calculateSolarDetachResetQuote: service.calculateSolarDetachResetQuote,
+  calculateRoofFinancingOffer: service.calculateRoofFinancingOffer,
+  calculateXactimateCodeSupplement: service.calculateXactimateCodeSupplement,
+  evaluateServiceTicketTriage: service.evaluateServiceTicketTriage,
 };
 
 

@@ -20518,6 +20518,1009 @@ app.post('/api/qc-walkthrough/:id/sign-off', async (req: Request, res: Response)
 });
 
 // ==============================================================================
+// 6K. HOA ARCHITECTURAL REVIEW COMMITTEE (ARC) APPROVAL GATE (FEATURE #11)
+// ==============================================================================
+
+export interface HoaArcComplianceEvaluation {
+  hoaRequired: boolean;
+  hoaManagementCompany: string;
+  hoaCommunityName: string;
+  hoaArcStatus: string;
+  sampleBoardSubmitted: boolean;
+  ccrColorApproved: string | null;
+  clearedForMobilization: boolean;
+  blockers: string[];
+}
+
+export function evaluateHoaArcCompliance(opp: any): HoaArcComplianceEvaluation {
+  const hoaRequired = Boolean(opp?.hoaRequired || opp?.hoaManagementCompany);
+  const hoaManagementCompany = String(opp?.hoaManagementCompany || '').trim();
+  const hoaCommunityName = String(opp?.hoaCommunityName || '').trim();
+  const hoaArcStatus = String(
+    opp?.hoaArcStatus || (hoaRequired ? 'Pending ARC Submittal' : 'No HOA / Exempt')
+  ).trim();
+  const sampleBoardSubmitted = Boolean(opp?.hoaShingleSampleBoardSubmitted);
+  const ccrColorApproved = opp?.hoaCcrColorApproved ? String(opp.hoaCcrColorApproved).trim() : null;
+
+  const blockers: string[] = [];
+  if (hoaRequired) {
+    if (!sampleBoardSubmitted) {
+      blockers.push('Physical/Digital Manufacturer Shingle Sample Board & Spec Sheet must be submitted to HOA ARC.');
+    }
+    if (hoaArcStatus !== 'Approved') {
+      blockers.push(`HOA Architectural Review Committee (ARC) status is "${hoaArcStatus}" (must be "Approved" before tear-off mobilization).`);
+    }
+  }
+
+  return {
+    hoaRequired,
+    hoaManagementCompany: hoaManagementCompany || 'No HOA / Exempt',
+    hoaCommunityName: hoaCommunityName || 'N/A',
+    hoaArcStatus,
+    sampleBoardSubmitted,
+    ccrColorApproved,
+    clearedForMobilization: !hoaRequired || blockers.length === 0,
+    blockers,
+  };
+}
+
+app.get('/api/hoa-arc/:id/status', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const opp = opportunityMemoryStore.get(oppId) || { id: oppId };
+  const compliance = evaluateHoaArcCompliance(opp);
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    hoaPacketUrl: opp.hoaPacketUrl || null,
+    hoaApprovalLetterUrl: opp.hoaApprovalLetterUrl || null,
+    compliance,
+  });
+});
+
+app.post('/api/hoa-arc/:id/submit-packet', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const existing = opportunityMemoryStore.get(oppId) || { id: oppId };
+
+  const hoaManagementCompany = String(
+    req.body?.hoaManagementCompany || existing.hoaManagementCompany || 'FirstService Residential HOA'
+  ).trim();
+  const hoaCommunityName = String(
+    req.body?.hoaCommunityName || existing.hoaCommunityName || 'Del Mar Highlands Estates HOA'
+  ).trim();
+  const hoaArcContactEmail = String(
+    req.body?.hoaArcContactEmail || existing.hoaArcContactEmail || 'arc@firstserviceresidential.example.com'
+  ).trim();
+  const shingleColor = String(
+    req.body?.shingleColor || existing.shingleColor || 'GAF Timberline HDZ — Charcoal'
+  ).trim();
+  const packetUrl = `${process.env.PUBLIC_BASE_URL || 'http://localhost:4000'}/hoa-arc/${oppId}/packet`;
+
+  const updatedOpp = {
+    ...existing,
+    hoaRequired: true,
+    hoaManagementCompany,
+    hoaCommunityName,
+    hoaArcContactEmail,
+    shingleColor,
+    hoaShingleSampleBoardSubmitted: true,
+    hoaArcStatus: 'Submitted - Pending ARC Review',
+    hoaArcSubmittedAt: new Date().toISOString(),
+    hoaPacketUrl: packetUrl,
+  };
+  opportunityMemoryStore.set(oppId, updatedOpp);
+
+  const compliance = evaluateHoaArcCompliance(updatedOpp);
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    hoaManagementCompany,
+    hoaCommunityName,
+    shingleColor,
+    packetUrl,
+    hoaArcStatus: updatedOpp.hoaArcStatus,
+    compliance,
+    opportunity: updatedOpp,
+  });
+});
+
+app.post('/api/hoa-arc/:id/approve', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const existing = opportunityMemoryStore.get(oppId) || { id: oppId };
+
+  const approvedColor = String(
+    req.body?.approvedColor || existing.shingleColor || 'GAF Timberline HDZ — Charcoal'
+  ).trim();
+  const approvalLetterUrl = String(
+    req.body?.approvalLetterUrl || `http://localhost:4000/hoa-arc/${oppId}/packet?status=approved`
+  ).trim();
+
+  const updatedOpp = {
+    ...existing,
+    hoaRequired: true,
+    hoaShingleSampleBoardSubmitted: true,
+    hoaCcrColorApproved: approvedColor,
+    hoaArcStatus: 'Approved',
+    hoaArcApprovedAt: new Date().toISOString(),
+    hoaApprovalLetterUrl: approvalLetterUrl,
+  };
+  opportunityMemoryStore.set(oppId, updatedOpp);
+
+  const compliance = evaluateHoaArcCompliance(updatedOpp);
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    hoaArcStatus: updatedOpp.hoaArcStatus,
+    approvedColor,
+    approvalLetterUrl,
+    compliance,
+    opportunity: updatedOpp,
+  });
+});
+
+app.post('/api/hoa-arc/:id/verify-mobilization', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const existing = opportunityMemoryStore.get(oppId) || { id: oppId };
+  const compliance = evaluateHoaArcCompliance(existing);
+
+  if (!compliance.clearedForMobilization) {
+    return res.status(403).json({
+      success: false,
+      error: `HOA ARC MOBILIZATION GATE: Cannot dispatch rooftop material drop or begin tear-off until HOA ARC approval is on file. ${compliance.blockers.join(' ')}`,
+      compliance,
+    });
+  }
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    clearedForMobilization: true,
+    compliance,
+  });
+});
+
+app.get('/hoa-arc/:id/packet', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const opp = opportunityMemoryStore.get(oppId);
+  if (!opp || !opp.hoaManagementCompany) {
+    return res.status(404).send('<h2>HOA ARC Submittal Packet Not Found</h2>');
+  }
+
+  const qrDataUrl = await QRCode.toDataURL(
+    opp.hoaPacketUrl || `http://localhost:4000/hoa-arc/${oppId}/packet`,
+    { margin: 1, width: 100 }
+  );
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>HOA ARC Submittal Packet — ${opp.hoaCommunityName}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8fafc; padding: 24px; color: #0f172a; }
+    .card { max-width: 740px; margin: 0 auto; background: #fff; border: 3px solid #1e293b; border-radius: 8px; padding: 26px; }
+    .hdr { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #1e293b; padding-bottom: 14px; margin-bottom: 16px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="hdr">
+      <div>
+        <div style="font-size: 11px; font-weight: 800; text-transform: uppercase; color: #475569;">ARCHITECTURAL REVIEW COMMITTEE (ARC) SUBMITTAL</div>
+        <h1 style="margin: 4px 0; font-size: 22px;">${opp.hoaCommunityName}</h1>
+        <div style="font-size: 14px; font-weight: 700; color: #2563eb;">Management: ${opp.hoaManagementCompany} • Status: ${opp.hoaArcStatus}</div>
+      </div>
+      <img src="${qrDataUrl}" alt="HOA Packet QR" style="width: 84px; height: 84px;" />
+    </div>
+    <p><strong>Homeowner & Property:</strong> ${opp.customerName || 'Homeowner'} — ${opp.addressStreet || 'Property'}, ${opp.addressCity || 'San Diego'}</p>
+    <p><strong>Proposed Roofing Material & CC&R Color:</strong> ${opp.shingleColor || 'GAF Timberline HDZ — Charcoal'} (Class A Fire Rated, 130 MPH Wind Warranty)</p>
+    <ul>
+      <li>[✓] Manufacturer Architectural Shingle Color Sample Board & Technical Data Sheet</li>
+      <li>[✓] California CSLB C-39 Roofing License & $2,000,000 General Liability COI Naming ${opp.hoaCommunityName} as Additional Insured</li>
+      <li>[✓] Aerial Roof Facet Diagram & Perimeter Gutter / Fascia Color Match Specification</li>
+    </ul>
+  </div>
+</body>
+</html>`;
+
+  res.status(200).type('text/html').send(html);
+});
+
+// ==============================================================================
+// 6L. SOLAR PANEL DETACH & RESET (D&R) COORDINATION & SUB-TRADE TRACKER (FEATURE #12)
+// ==============================================================================
+
+export interface SolarDetachResetCalculation {
+  hasRooftopSolar: boolean;
+  panelCount: number;
+  inverterType: string;
+  perPanelRate: number;
+  standoffKitFee: number;
+  panelLaborSubtotal: number;
+  totalDnRQuote: number;
+  detachCompleted: boolean;
+  finalRoofInspectionPassed: boolean;
+  readyForRoofTearOff: boolean;
+  readyForSolarReset: boolean;
+  ptoRecommissioned: boolean;
+  blockers: string[];
+}
+
+export function calculateSolarDetachResetQuote(opp: any): SolarDetachResetCalculation {
+  const panelCount = Math.max(0, Number(opp?.solarPanelCount ?? 0));
+  const hasRooftopSolar = Boolean(opp?.hasRooftopSolar || panelCount > 0);
+  const inverterType = String(opp?.solarInverterType || 'Enphase IQ8 Microinverters').trim();
+  const perPanelRate = Math.round(Number(opp?.solarDnRPerPanelRate ?? 225) * 100) / 100;
+  const standoffKitFee = Math.round(Number(opp?.solarStandoffKitFee ?? (panelCount > 0 ? 450 : 0)) * 100) / 100;
+
+  const panelLaborSubtotal = Math.round(panelCount * perPanelRate * 100) / 100;
+  const totalDnRQuote = Math.round((panelLaborSubtotal + standoffKitFee) * 100) / 100;
+
+  const detachCompleted = Boolean(opp?.solarDetachCompletedAt);
+  const finalRoofInspectionPassed =
+    !opp?.permitNumber || opp?.finalInspectionStatus === 'Passed' || opp?.finalInspectionStatus === 'Waived';
+  const ptoRecommissioned = Boolean(opp?.solarPtoVerified && opp?.solarSystemRecommissionedAt);
+
+  const blockers: string[] = [];
+  if (hasRooftopSolar) {
+    if (!detachCompleted) {
+      blockers.push('Stage 1 Solar Panel Detach & Safe On-Site Storage must be completed before roof tear-off.');
+    }
+    if (!finalRoofInspectionPassed) {
+      blockers.push('Municipal Final Roof Building Inspection must pass before resetting solar racking and panels.');
+    }
+  }
+
+  return {
+    hasRooftopSolar,
+    panelCount,
+    inverterType,
+    perPanelRate,
+    standoffKitFee,
+    panelLaborSubtotal,
+    totalDnRQuote,
+    detachCompleted,
+    finalRoofInspectionPassed,
+    readyForRoofTearOff: !hasRooftopSolar || detachCompleted,
+    readyForSolarReset: !hasRooftopSolar || (detachCompleted && finalRoofInspectionPassed),
+    ptoRecommissioned,
+    blockers,
+  };
+}
+
+app.get('/api/solar-dnr/:id/status', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const opp = opportunityMemoryStore.get(oppId) || { id: oppId };
+  const calculation = calculateSolarDetachResetQuote(opp);
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    solarProviderName: opp.solarProviderName || 'Sunline Solar D&R Specialists',
+    solarDnRStatus: opp.solarDnRStatus || (calculation.hasRooftopSolar ? 'Pending Detach' : 'No Solar Array'),
+    solarQboBillId: opp.solarQboBillId || null,
+    calculation,
+  });
+});
+
+app.post('/api/solar-dnr/:id/schedule-detach', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const existing = opportunityMemoryStore.get(oppId) || { id: oppId };
+
+  const panelCount = Number(req.body?.panelCount ?? existing.solarPanelCount ?? 22);
+  const inverterType = String(req.body?.inverterType || existing.solarInverterType || 'Enphase IQ8 Microinverters').trim();
+  const solarProviderName = String(
+    req.body?.solarProviderName || existing.solarProviderName || 'Sunline Solar D&R Specialists'
+  ).trim();
+  const perPanelRate = Number(req.body?.perPanelRate ?? existing.solarDnRPerPanelRate ?? 225);
+  const standoffKitFee = Number(req.body?.standoffKitFee ?? existing.solarStandoffKitFee ?? 450);
+  const markDetachCompleted = Boolean(req.body?.markDetachCompleted);
+  const scheduledDate = String(req.body?.scheduledDate || new Date().toISOString().slice(0, 10)).trim();
+
+  const updatedOpp: any = {
+    ...existing,
+    hasRooftopSolar: true,
+    solarPanelCount: panelCount,
+    solarInverterType: inverterType,
+    solarProviderName,
+    solarDnRPerPanelRate: perPanelRate,
+    solarStandoffKitFee: standoffKitFee,
+    solarDetachScheduledAt: scheduledDate,
+    solarDetachCompletedAt: markDetachCompleted ? new Date().toISOString() : existing.solarDetachCompletedAt || null,
+  };
+
+  const calculation = calculateSolarDetachResetQuote(updatedOpp);
+  updatedOpp.solarDnRTotalQuote = calculation.totalDnRQuote;
+  updatedOpp.solarDnRStatus = markDetachCompleted
+    ? 'Stage 1 Detach Complete — Ready for Roof Tear-Off'
+    : 'Stage 1 Solar Detach Scheduled';
+
+  opportunityMemoryStore.set(oppId, updatedOpp);
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    solarDnRStatus: updatedOpp.solarDnRStatus,
+    calculation,
+    opportunity: updatedOpp,
+  });
+});
+
+app.post('/api/solar-dnr/:id/complete-reset', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const existing = opportunityMemoryStore.get(oppId) || { id: oppId };
+
+  const calcBefore = calculateSolarDetachResetQuote(existing);
+  if (!calcBefore.readyForSolarReset) {
+    return res.status(403).json({
+      success: false,
+      error: `SOLAR RESET PRODUCTION GATE: Cannot reset solar panels or release solar sub-trade payout yet. ${calcBefore.blockers.join(' ')}`,
+      calculation: calcBefore,
+    });
+  }
+
+  const solarProviderName = String(
+    req.body?.solarProviderName || existing.solarProviderName || 'Sunline Solar D&R Specialists'
+  ).trim();
+
+  const vendor = await findOrCreateQuickBooksVendor({
+    displayName: solarProviderName,
+    vendor1099: true,
+  });
+
+  const qboBill = await createQuickBooksVendorBill({
+    vendorId: vendor.vendorId,
+    vendorName: vendor.displayName,
+    docNumber: `SOLAR-${oppId.slice(-6).toUpperCase()}`,
+    amount: calcBefore.totalDnRQuote,
+    category: 'labor',
+    memo: `Solar Panel Detach & Reset (${calcBefore.panelCount} Panels @ $${calcBefore.perPanelRate}/panel + $${calcBefore.standoffKitFee} flashed standoffs • ${calcBefore.inverterType})`,
+    customerId: existing.qboCustomerId ? String(existing.qboCustomerId) : undefined,
+  });
+
+  const nowIso = new Date().toISOString();
+  const updatedOpp: any = {
+    ...existing,
+    solarProviderName,
+    solarResetScheduledAt: nowIso,
+    solarSystemRecommissionedAt: nowIso,
+    solarPtoVerified: true,
+    solarQboBillId: qboBill.billId,
+    solarDnRStatus: 'Stage 2 Reset Complete & PTO Recommissioned',
+  };
+
+  opportunityMemoryStore.set(oppId, updatedOpp);
+  const calculation = calculateSolarDetachResetQuote(updatedOpp);
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    solarDnRStatus: updatedOpp.solarDnRStatus,
+    totalDnRQuote: calculation.totalDnRQuote,
+    qboBillId: qboBill.billId,
+    qboVendorId: vendor.vendorId,
+    calculation,
+    opportunity: updatedOpp,
+  });
+});
+
+// ==============================================================================
+// 6M. POINT-OF-SALE HOMEOWNER ROOF FINANCING & DEALER-FEE ENGINE (FEATURE #13)
+// ==============================================================================
+
+export interface RoofFinancingOffer {
+  lender: string;
+  planCode: string;
+  planName: string;
+  principalAmount: number;
+  aprPct: number;
+  termMonths: number;
+  monthlyPayment: number;
+  dealerFeePct: number;
+  dealerFeeAmount: number;
+  netFundedAmount: number;
+}
+
+export function calculateRoofFinancingOffer(input: {
+  lender?: string;
+  planCode?: string;
+  principalAmount?: number;
+}): RoofFinancingOffer {
+  const lender = String(input?.lender || 'GoodLeap').trim();
+  const planCode = String(input?.planCode || 'STD_120M_999').trim().toUpperCase();
+  const principalAmount = Math.max(0, Math.round(Number(input?.principalAmount ?? 20000) * 100) / 100);
+
+  let planName = '10-Year Standard Fixed (9.99% APR • 120 Months)';
+  let aprPct = 9.99;
+  let termMonths = 120;
+  let dealerFeePct = 5.5;
+
+  if (planCode === 'SAC_12M_0APR') {
+    planName = '12-Month Same-As-Cash Promotional (0.00% APR)';
+    aprPct = 0;
+    termMonths = 12;
+    dealerFeePct = 11.5;
+  } else if (planCode === 'LOW_180M_799') {
+    planName = '15-Year Low Monthly Payment (7.99% APR • 180 Months)';
+    aprPct = 7.99;
+    termMonths = 180;
+    dealerFeePct = 8.75;
+  }
+
+  let monthlyPayment = 0;
+  if (aprPct <= 0) {
+    monthlyPayment = Math.round((principalAmount / termMonths) * 100) / 100;
+  } else {
+    const r = aprPct / 100 / 12;
+    const factor = Math.pow(1 + r, termMonths);
+    monthlyPayment = Math.round(((principalAmount * (r * factor)) / (factor - 1)) * 100) / 100;
+  }
+
+  const dealerFeeAmount = Math.round(((principalAmount * dealerFeePct) / 100) * 100) / 100;
+  const netFundedAmount = Math.round((principalAmount - dealerFeeAmount) * 100) / 100;
+
+  return {
+    lender,
+    planCode,
+    planName,
+    principalAmount,
+    aprPct,
+    termMonths,
+    monthlyPayment,
+    dealerFeePct,
+    dealerFeeAmount,
+    netFundedAmount,
+  };
+}
+
+app.get('/api/financing/:id/status', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const opp = opportunityMemoryStore.get(oppId) || { id: oppId };
+  const offer = calculateRoofFinancingOffer({
+    lender: opp.financingLender,
+    planCode: opp.financingPlanCode,
+    principalAmount: opp.financingPrincipalAmount || opp.rcvApprovedAmount || 20000,
+  });
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    financingApplicationStatus: opp.financingApplicationStatus || 'Not Applied',
+    financingFundedAt: opp.financingFundedAt || null,
+    offer,
+  });
+});
+
+app.post('/api/financing/:id/send-prequal', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const existing = opportunityMemoryStore.get(oppId) || { id: oppId };
+
+  const offer = calculateRoofFinancingOffer({
+    lender: req.body?.lender || existing.financingLender || 'GoodLeap',
+    planCode: req.body?.planCode || existing.financingPlanCode || 'STD_120M_999',
+    principalAmount: req.body?.principalAmount ?? existing.financingPrincipalAmount ?? existing.rcvApprovedAmount ?? 20000,
+  });
+
+  const updatedOpp = {
+    ...existing,
+    financingLender: offer.lender,
+    financingPlanCode: offer.planCode,
+    financingPrincipalAmount: offer.principalAmount,
+    financingAprPct: offer.aprPct,
+    financingTermMonths: offer.termMonths,
+    financingMonthlyPayment: offer.monthlyPayment,
+    financingDealerFeePct: offer.dealerFeePct,
+    financingDealerFeeAmount: offer.dealerFeeAmount,
+    financingNetFundedAmount: offer.netFundedAmount,
+    financingApplicationStatus: 'Pre-Qual Link Sent',
+  };
+  opportunityMemoryStore.set(oppId, updatedOpp);
+
+  console.log(
+    `[POS Financing Pre-Qual SMS] [Dev Mode] Sent to Homeowner:\n` +
+      `💳 ${offer.lender} Roof Financing Pre-Qualification (${offer.planName})\n` +
+      `• Financed Amount: $${offer.principalAmount.toFixed(2)}\n` +
+      `• Est. Monthly Payment: $${offer.monthlyPayment.toFixed(2)}/mo (Zero impact to credit score)`
+  );
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    financingApplicationStatus: updatedOpp.financingApplicationStatus,
+    offer,
+    opportunity: updatedOpp,
+  });
+});
+
+app.post('/api/financing/:id/record-funding', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const existing = opportunityMemoryStore.get(oppId) || { id: oppId };
+
+  const offer = calculateRoofFinancingOffer({
+    lender: req.body?.lender || existing.financingLender || 'GoodLeap',
+    planCode: req.body?.planCode || existing.financingPlanCode || 'SAC_12M_0APR',
+    principalAmount: req.body?.principalAmount ?? existing.financingPrincipalAmount ?? 20000,
+  });
+
+  // Record Dealer Fee as a QBO Vendor Bill so job profitability reflects net funded cash
+  const lenderVendor = await findOrCreateQuickBooksVendor({
+    displayName: `${offer.lender} Merchant Dealer Fees`,
+    vendor1099: false,
+  });
+
+  const dealerFeeBill = await createQuickBooksVendorBill({
+    vendorId: lenderVendor.vendorId,
+    vendorName: lenderVendor.displayName,
+    docNumber: `DLR-${oppId.slice(-6).toUpperCase()}`,
+    amount: offer.dealerFeeAmount,
+    category: 'other',
+    memo: `${offer.lender} Promotional Dealer Fee (${offer.dealerFeePct}% on $${offer.principalAmount.toFixed(2)} • ${offer.planCode})`,
+    customerId: existing.qboCustomerId ? String(existing.qboCustomerId) : undefined,
+  });
+
+  const updatedOpp: any = {
+    ...existing,
+    financingLender: offer.lender,
+    financingPlanCode: offer.planCode,
+    financingPrincipalAmount: offer.principalAmount,
+    financingAprPct: offer.aprPct,
+    financingTermMonths: offer.termMonths,
+    financingMonthlyPayment: offer.monthlyPayment,
+    financingDealerFeePct: offer.dealerFeePct,
+    financingDealerFeeAmount: offer.dealerFeeAmount,
+    financingNetFundedAmount: offer.netFundedAmount,
+    financingStipsCleared: true,
+    financingApplicationStatus: 'Funded & Disbursed',
+    financingFundedAt: new Date().toISOString(),
+    financingQboPaymentId: dealerFeeBill.billId,
+  };
+  opportunityMemoryStore.set(oppId, updatedOpp);
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    financingApplicationStatus: updatedOpp.financingApplicationStatus,
+    offer,
+    dealerFeeQboBillId: dealerFeeBill.billId,
+    opportunity: updatedOpp,
+  });
+});
+
+// ==============================================================================
+// 6N. XACTIMATE CODE-UPGRADE & 10%/10% O&P SUPPLEMENT BUILDER (FEATURE #14)
+// ==============================================================================
+
+export interface XactimateSupplementLineItem {
+  xactimateCode: string;
+  description: string;
+  codeCitation: string;
+  quantity: number;
+  unit: string;
+  unitPrice: number;
+  lineTotal: number;
+}
+
+export interface XactimateSupplementCalculation {
+  initialRcv: number;
+  tradesCount: number;
+  opEligible: boolean;
+  lineItems: XactimateSupplementLineItem[];
+  codeUpgradeSubtotal: number;
+  overheadAndProfitAmount: number;
+  totalSupplementRequested: number;
+  revisedRcvTotal: number;
+}
+
+export function calculateXactimateCodeSupplement(input: {
+  initialRcv?: number;
+  eaveLf?: number;
+  rakeLf?: number;
+  valleyLf?: number;
+  stepFlashingLf?: number;
+  steepSquares?: number;
+  ridgeLf?: number;
+  tradesCount?: number;
+  forceOp?: boolean;
+}): XactimateSupplementCalculation {
+  const initialRcv = Math.round(Number(input?.initialRcv ?? 18000) * 100) / 100;
+  const eaveLf = Math.max(0, Number(input?.eaveLf ?? 180));
+  const rakeLf = Math.max(0, Number(input?.rakeLf ?? 140));
+  const valleyLf = Math.max(0, Number(input?.valleyLf ?? 60));
+  const stepFlashingLf = Math.max(0, Number(input?.stepFlashingLf ?? 45));
+  const steepSquares = Math.max(0, Number(input?.steepSquares ?? 10));
+  const ridgeLf = Math.max(0, Number(input?.ridgeLf ?? 110));
+  const tradesCount = Math.max(1, Number(input?.tradesCount ?? 3));
+  const opEligible = tradesCount >= 3 || Boolean(input?.forceOp);
+
+  const perimeterLf = eaveLf + rakeLf;
+  const valleyIceWaterSf = valleyLf * 3; // 36-inch wide roll along valleys
+
+  const lineItems: XactimateSupplementLineItem[] = [
+    {
+      xactimateCode: 'RFG DRIP',
+      description: 'Drip Edge — Eaves & Rakes (Galvanized/Painted 26ga)',
+      codeCitation: 'CBC R905.2.8.5 / IRC R905.2.8.5 Mandatory Perimeter Drip Edge',
+      quantity: perimeterLf,
+      unit: 'LF',
+      unitPrice: 4.15,
+      lineTotal: Math.round(perimeterLf * 4.15 * 100) / 100,
+    },
+    {
+      xactimateCode: 'RFG IWS',
+      description: 'Ice & Water Leak Barrier Membrane in Roof Valleys',
+      codeCitation: 'CBC R905.2.8.2 Valley Lining & Self-Adhering Polymer Modified Bitumen',
+      quantity: valleyIceWaterSf,
+      unit: 'SF',
+      unitPrice: 2.65,
+      lineTotal: Math.round(valleyIceWaterSf * 2.65 * 100) / 100,
+    },
+    {
+      xactimateCode: 'RFG STEP',
+      description: 'Step Flashing — Roof-to-Vertical Wall Intersections (4"x4"x8" Min.)',
+      codeCitation: 'CBC R905.2.8.3 Sidewall Step Flashing Code Requirement',
+      quantity: stepFlashingLf,
+      unit: 'LF',
+      unitPrice: 12.8,
+      lineTotal: Math.round(stepFlashingLf * 12.8 * 100) / 100,
+    },
+    {
+      xactimateCode: 'RFG HIGH',
+      description: 'Additional Charge for Steep Roof Slope (7/12 to 9/12 Pitch)',
+      codeCitation: 'OSHA 1926.501 Fall Protection Harness & Roof Jack Labor Allowance',
+      quantity: steepSquares,
+      unit: 'SQ',
+      unitPrice: 64.5,
+      lineTotal: Math.round(steepSquares * 64.5 * 100) / 100,
+    },
+    {
+      xactimateCode: 'RFG RIDGC',
+      description: 'High-Profile Hip & Ridge Cap + Universal Starter Course',
+      codeCitation: 'CBC R905.2.4.1 / Manufacturer 130 MPH Wind Warranty Assembly Requirement',
+      quantity: ridgeLf,
+      unit: 'LF',
+      unitPrice: 8.4,
+      lineTotal: Math.round(ridgeLf * 8.4 * 100) / 100,
+    },
+  ];
+
+  const codeUpgradeSubtotal =
+    Math.round(lineItems.reduce((sum, item) => sum + item.lineTotal, 0) * 100) / 100;
+
+  // 10% General Contractor Overhead + 10% Profit (20% combined) when >=3 trades are coordinated
+  const overheadAndProfitAmount = opEligible
+    ? Math.round((initialRcv + codeUpgradeSubtotal) * 0.2 * 100) / 100
+    : 0;
+
+  const totalSupplementRequested = Math.round((codeUpgradeSubtotal + overheadAndProfitAmount) * 100) / 100;
+  const revisedRcvTotal = Math.round((initialRcv + totalSupplementRequested) * 100) / 100;
+
+  return {
+    initialRcv,
+    tradesCount,
+    opEligible,
+    lineItems,
+    codeUpgradeSubtotal,
+    overheadAndProfitAmount,
+    totalSupplementRequested,
+    revisedRcvTotal,
+  };
+}
+
+app.get('/api/supplements/:id/status', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const opp = opportunityMemoryStore.get(oppId) || { id: oppId };
+  const calculation = calculateXactimateCodeSupplement({
+    initialRcv: opp.supplementInitialRcv || opp.rcvApprovedAmount || 18000,
+    tradesCount: opp.supplementTradesCount || 3,
+  });
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    supplementStatus: opp.supplementStatus || 'Draft',
+    supplementApprovedAmount: Number(opp.supplementApprovedAmount ?? 0),
+    supplementRebuttalPacketUrl: opp.supplementRebuttalPacketUrl || null,
+    calculation,
+  });
+});
+
+app.post('/api/supplements/:id/generate', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const existing = opportunityMemoryStore.get(oppId) || { id: oppId };
+
+  const calculation = calculateXactimateCodeSupplement({
+    initialRcv: req.body?.initialRcv ?? existing.rcvApprovedAmount ?? 18000,
+    eaveLf: req.body?.eaveLf,
+    rakeLf: req.body?.rakeLf,
+    valleyLf: req.body?.valleyLf,
+    stepFlashingLf: req.body?.stepFlashingLf,
+    steepSquares: req.body?.steepSquares,
+    ridgeLf: req.body?.ridgeLf,
+    tradesCount: req.body?.tradesCount ?? 3,
+    forceOp: req.body?.forceOp,
+  });
+
+  const rebuttalPacketUrl = `${process.env.PUBLIC_BASE_URL || 'http://localhost:4000'}/supplements/${oppId}/rebuttal-packet`;
+
+  const updatedOpp = {
+    ...existing,
+    supplementStatus: 'Submitted to Carrier Adjuster',
+    supplementCodeItemsJson: calculation.lineItems,
+    supplementTradesCount: calculation.tradesCount,
+    supplementOpApplied: calculation.opEligible,
+    supplementCodeSubtotal: calculation.codeUpgradeSubtotal,
+    supplementOpAmount: calculation.overheadAndProfitAmount,
+    supplementRequestedAmount: calculation.totalSupplementRequested,
+    supplementInitialRcv: calculation.initialRcv,
+    supplementRevisedRcv: calculation.revisedRcvTotal,
+    supplementRebuttalPacketUrl: rebuttalPacketUrl,
+    supplementSubmittedAt: new Date().toISOString(),
+  };
+  opportunityMemoryStore.set(oppId, updatedOpp);
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    supplementStatus: updatedOpp.supplementStatus,
+    rebuttalPacketUrl,
+    calculation,
+    opportunity: updatedOpp,
+  });
+});
+
+app.post('/api/supplements/:id/approve', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const existing = opportunityMemoryStore.get(oppId) || { id: oppId };
+
+  const approvedAmount = Number(
+    req.body?.approvedAmount ?? existing.supplementRequestedAmount ?? 6400
+  );
+  const initialRcv = Number(existing.supplementInitialRcv ?? existing.rcvApprovedAmount ?? 18000);
+  const revisedRcv = Math.round((initialRcv + approvedAmount) * 100) / 100;
+
+  let qboInvoiceUpdated: any = null;
+  if (existing.qboInvoiceId) {
+    try {
+      qboInvoiceUpdated = await appendChangeOrderLineToQuickBooksInvoice({
+        invoiceId: String(existing.qboInvoiceId),
+        amount: approvedAmount,
+        description: `Approved Insurance Carrier Xactimate Code & O&P Supplement (Claim #${existing.claimNumber || oppId})`,
+      });
+    } catch (err: any) {
+      console.warn('[Supplement QBO Invoice Update Note]:', err?.message || err);
+    }
+  }
+
+  const updatedOpp = {
+    ...existing,
+    supplementStatus: 'Approved by Carrier',
+    supplementApprovedAmount: approvedAmount,
+    supplementRevisedRcv: revisedRcv,
+    rcvApprovedAmount: revisedRcv,
+    supplementApprovedAt: new Date().toISOString(),
+  };
+  opportunityMemoryStore.set(oppId, updatedOpp);
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    supplementStatus: updatedOpp.supplementStatus,
+    approvedAmount,
+    revisedRcv,
+    qboInvoiceUpdated,
+    opportunity: updatedOpp,
+  });
+});
+
+app.get('/supplements/:id/rebuttal-packet', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const opp = opportunityMemoryStore.get(oppId);
+  if (!opp || !opp.supplementCodeItemsJson) {
+    return res.status(404).send('<h2>Xactimate Supplement Rebuttal Packet Not Found</h2>');
+  }
+
+  const rowsHtml = (opp.supplementCodeItemsJson as XactimateSupplementLineItem[])
+    .map(
+      (item) => `<tr>
+        <td><strong>${item.xactimateCode}</strong></td>
+        <td>${item.description}<br/><small style="color:#475569;">${item.codeCitation}</small></td>
+        <td>${item.quantity} ${item.unit}</td>
+        <td>$${item.unitPrice.toFixed(2)}</td>
+        <td><strong>$${item.lineTotal.toFixed(2)}</strong></td>
+      </tr>`
+    )
+    .join('');
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Xactimate Code & O&P Supplement Packet — ${oppId}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f1f5f9; padding: 24px; color: #0f172a; }
+    .doc { max-width: 800px; margin: 0 auto; background: #fff; border: 3px solid #0f172a; border-radius: 8px; padding: 28px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+    th, td { border: 1px solid #cbd5e1; padding: 10px; text-align: left; font-size: 13px; }
+    th { background: #0f172a; color: #fff; }
+  </style>
+</head>
+<body>
+  <div class="doc">
+    <h1>CARRIER XACTIMATE CODE-UPGRADE & O&P SUPPLEMENT</h1>
+    <p><strong>Insured:</strong> ${opp.customerName || 'Homeowner'} • <strong>Claim #:</strong> ${opp.claimNumber || 'CLM-2026'}</p>
+    <p><strong>Initial Carrier RCV:</strong> $${Number(opp.supplementInitialRcv || 0).toFixed(2)} • <strong>Requested Supplement:</strong> +$${Number(opp.supplementRequestedAmount || 0).toFixed(2)} • <strong>Revised RCV:</strong> $${Number(opp.supplementRevisedRcv || 0).toFixed(2)}</p>
+    <table>
+      <thead>
+        <tr><th>Code</th><th>Line Item & Building Code Citation</th><th>Qty</th><th>Unit</th><th>Total</th></tr>
+      </thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>
+    <p style="margin-top: 14px;"><strong>10% General Contractor Overhead & 10% Profit (${opp.supplementTradesCount} Trades Coordinated):</strong> $${Number(opp.supplementOpAmount || 0).toFixed(2)}</p>
+  </div>
+</body>
+</html>`;
+
+  res.status(200).type('text/html').send(html);
+});
+
+// ==============================================================================
+// 6O. POST-INSTALL LEAK SERVICE TICKET & ANNUAL TUNE-UP MEMBERSHIP (FEATURE #15)
+// ==============================================================================
+
+export interface ServiceTicketTriageResult {
+  category: string;
+  isActiveRain: boolean;
+  priority: 'EMERGENCY_24HR_SLA' | 'STANDARD_72HR_SLA';
+  slaHours: 24 | 72;
+  warrantyCovered: boolean;
+  crewBackchargeAmount: number;
+}
+
+export function evaluateServiceTicketTriage(input: {
+  category?: string;
+  isActiveRain?: boolean;
+  workmanshipWarrantyActive?: boolean;
+  estimatedRepairCost?: number;
+}): ServiceTicketTriageResult {
+  const category = String(input?.category || 'Active Rain Leak - Flashing/Pipe Boot').trim();
+  const isActiveRain = Boolean(input?.isActiveRain || category.toLowerCase().includes('leak'));
+  const workmanshipWarrantyActive = input?.workmanshipWarrantyActive !== false;
+  const estimatedRepairCost = Math.max(0, Number(input?.estimatedRepairCost ?? 350));
+
+  const priority = isActiveRain ? 'EMERGENCY_24HR_SLA' : 'STANDARD_72HR_SLA';
+  const slaHours = isActiveRain ? 24 : 72;
+  const warrantyCovered = workmanshipWarrantyActive;
+  const crewBackchargeAmount =
+    warrantyCovered && category.toLowerCase().includes('flashing')
+      ? Math.round(estimatedRepairCost * 100) / 100
+      : 0;
+
+  return {
+    category,
+    isActiveRain,
+    priority,
+    slaHours,
+    warrantyCovered,
+    crewBackchargeAmount,
+  };
+}
+
+app.get('/api/service-tickets/:id/status', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const opp = opportunityMemoryStore.get(oppId) || { id: oppId };
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    maintenancePlanEnrolled: Boolean(opp.maintenancePlanEnrolled),
+    maintenanceAnnualFee: Number(opp.maintenanceAnnualFee ?? 299),
+    maintenanceNextTuneUpDate: opp.maintenanceNextTuneUpDate || null,
+    serviceTicketId: opp.serviceTicketId || null,
+    serviceTicketStatus: opp.serviceTicketStatus || 'None',
+    serviceTicketCategory: opp.serviceTicketCategory || null,
+    serviceTicketPriority: opp.serviceTicketPriority || 'Standard',
+    serviceTicketAssignedTech: opp.serviceTicketAssignedTech || null,
+    serviceTicketWarrantyCovered: opp.serviceTicketWarrantyCovered !== false,
+    serviceTicketCrewBackchargeAmount: Number(opp.serviceTicketCrewBackchargeAmount ?? 0),
+    serviceTicketSlaDeadline: opp.serviceTicketSlaDeadline || null,
+  });
+});
+
+app.post('/api/service-tickets/:id/enroll-maintenance', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const existing = opportunityMemoryStore.get(oppId) || { id: oppId };
+
+  const annualFee = Number(req.body?.annualFee ?? 299);
+  const nextTuneUp = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+  const updatedOpp = {
+    ...existing,
+    maintenancePlanEnrolled: true,
+    maintenanceAnnualFee: annualFee,
+    maintenanceEnrolledAt: new Date().toISOString(),
+    maintenanceNextTuneUpDate: nextTuneUp,
+  };
+  opportunityMemoryStore.set(oppId, updatedOpp);
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    maintenancePlanEnrolled: true,
+    maintenanceAnnualFee: annualFee,
+    maintenanceNextTuneUpDate: nextTuneUp,
+    opportunity: updatedOpp,
+  });
+});
+
+app.post('/api/service-tickets/:id/dispatch', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const existing = opportunityMemoryStore.get(oppId) || { id: oppId };
+
+  const triage = evaluateServiceTicketTriage({
+    category: req.body?.category,
+    isActiveRain: req.body?.isActiveRain,
+    workmanshipWarrantyActive: req.body?.workmanshipWarrantyActive,
+    estimatedRepairCost: req.body?.estimatedRepairCost,
+  });
+
+  const ticketId = `SRV-${Date.now().toString().slice(-6)}`;
+  const assignedTech = String(req.body?.assignedTech || 'Miguel Santos (Lead Leak Diagnostic Tech)').trim();
+  const slaDeadline = new Date(Date.now() + triage.slaHours * 60 * 60 * 1000).toISOString();
+
+  const updatedOpp = {
+    ...existing,
+    serviceTicketId: ticketId,
+    serviceTicketStatus: 'Dispatched - En Route',
+    serviceTicketCategory: triage.category,
+    serviceTicketPriority: triage.priority,
+    serviceTicketAssignedTech: assignedTech,
+    serviceTicketWarrantyCovered: triage.warrantyCovered,
+    serviceTicketCrewBackchargeAmount: triage.crewBackchargeAmount,
+    serviceTicketSlaDeadline: slaDeadline,
+  };
+  opportunityMemoryStore.set(oppId, updatedOpp);
+
+  console.log(
+    `[Service Ticket Dispatch SMS] [Dev Mode] Ticket #${ticketId} (${triage.priority}):\n` +
+      `• Category: ${triage.category}\n` +
+      `• Tech: ${assignedTech} • SLA: ${triage.slaHours} Hours\n` +
+      `• Crew Workmanship Back-Charge: $${triage.crewBackchargeAmount.toFixed(2)}`
+  );
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    ticketId,
+    assignedTech,
+    slaDeadline,
+    triage,
+    opportunity: updatedOpp,
+  });
+});
+
+app.post('/api/service-tickets/:id/resolve', async (req: Request, res: Response) => {
+  const oppId = req.params.id;
+  const existing = opportunityMemoryStore.get(oppId) || { id: oppId };
+
+  const updatedOpp = {
+    ...existing,
+    serviceTicketStatus: 'Resolved & Water-Tested',
+    serviceTicketResolvedAt: new Date().toISOString(),
+  };
+  opportunityMemoryStore.set(oppId, updatedOpp);
+
+  res.status(200).json({
+    success: true,
+    opportunityId: oppId,
+    serviceTicketStatus: updatedOpp.serviceTicketStatus,
+    serviceTicketResolvedAt: updatedOpp.serviceTicketResolvedAt,
+    opportunity: updatedOpp,
+  });
+});
+
+// ==============================================================================
 // 7. SERVER BOOTSTRAP
 // ==============================================================================
 async function start() {

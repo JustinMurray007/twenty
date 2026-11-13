@@ -710,6 +710,95 @@ ALTER TABLE "opportunity"
     ADD COLUMN IF NOT EXISTS "qcHomeownerSignedBy" VARCHAR(150),
     ADD COLUMN IF NOT EXISTS "qcHomeownerSignedAt" TIMESTAMPTZ;
 
+-- ==============================================================================
+-- 17. HOA ARCHITECTURAL REVIEW COMMITTEE (ARC) SUBMITTAL & APPROVAL GATE
+-- ==============================================================================
+ALTER TABLE "opportunity"
+    ADD COLUMN IF NOT EXISTS "hoaRequired" BOOLEAN DEFAULT false,
+    ADD COLUMN IF NOT EXISTS "hoaManagementCompany" VARCHAR(150),
+    ADD COLUMN IF NOT EXISTS "hoaCommunityName" VARCHAR(150),
+    ADD COLUMN IF NOT EXISTS "hoaArcContactEmail" VARCHAR(150),
+    ADD COLUMN IF NOT EXISTS "hoaArcStatus" VARCHAR(60) DEFAULT 'No HOA / Exempt',
+    ADD COLUMN IF NOT EXISTS "hoaShingleSampleBoardSubmitted" BOOLEAN DEFAULT false,
+    ADD COLUMN IF NOT EXISTS "hoaCcrColorApproved" VARCHAR(120),
+    ADD COLUMN IF NOT EXISTS "hoaArcSubmittedAt" TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS "hoaArcApprovedAt" TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS "hoaApprovalLetterUrl" TEXT,
+    ADD COLUMN IF NOT EXISTS "hoaPacketUrl" TEXT;
+
+-- ==============================================================================
+-- 18. SOLAR PANEL DETACH & RESET (D&R) COORDINATION & SUB-TRADE TRACKER
+-- ==============================================================================
+ALTER TABLE "opportunity"
+    ADD COLUMN IF NOT EXISTS "hasRooftopSolar" BOOLEAN DEFAULT false,
+    ADD COLUMN IF NOT EXISTS "solarPanelCount" INTEGER DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS "solarInverterType" VARCHAR(100),
+    ADD COLUMN IF NOT EXISTS "solarProviderName" VARCHAR(150),
+    ADD COLUMN IF NOT EXISTS "solarDnRPerPanelRate" NUMERIC(10,2) DEFAULT 225.00,
+    ADD COLUMN IF NOT EXISTS "solarStandoffKitFee" NUMERIC(10,2) DEFAULT 450.00,
+    ADD COLUMN IF NOT EXISTS "solarDnRTotalQuote" NUMERIC(12,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS "solarDetachScheduledAt" TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS "solarDetachCompletedAt" TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS "solarResetScheduledAt" TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS "solarSystemRecommissionedAt" TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS "solarPtoVerified" BOOLEAN DEFAULT false,
+    ADD COLUMN IF NOT EXISTS "solarQboBillId" VARCHAR(100),
+    ADD COLUMN IF NOT EXISTS "solarDnRStatus" VARCHAR(80) DEFAULT 'No Solar Array';
+
+-- ==============================================================================
+-- 19. POINT-OF-SALE HOMEOWNER ROOF FINANCING & DEALER-FEE CALCULATOR
+-- ==============================================================================
+ALTER TABLE "opportunity"
+    ADD COLUMN IF NOT EXISTS "financingLender" VARCHAR(100),
+    ADD COLUMN IF NOT EXISTS "financingPlanCode" VARCHAR(100),
+    ADD COLUMN IF NOT EXISTS "financingPrincipalAmount" NUMERIC(12,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS "financingAprPct" NUMERIC(6,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS "financingTermMonths" INTEGER DEFAULT 120,
+    ADD COLUMN IF NOT EXISTS "financingMonthlyPayment" NUMERIC(10,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS "financingDealerFeePct" NUMERIC(6,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS "financingDealerFeeAmount" NUMERIC(10,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS "financingNetFundedAmount" NUMERIC(12,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS "financingApplicationStatus" VARCHAR(60) DEFAULT 'Not Applied',
+    ADD COLUMN IF NOT EXISTS "financingStipsCleared" BOOLEAN DEFAULT false,
+    ADD COLUMN IF NOT EXISTS "financingFundedAt" TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS "financingQboPaymentId" VARCHAR(100);
+
+-- ==============================================================================
+-- 20. XACTIMATE CODE-UPGRADE & 10%/10% OVERHEAD & PROFIT (O&P) SUPPLEMENT BUILDER
+-- ==============================================================================
+ALTER TABLE "opportunity"
+    ADD COLUMN IF NOT EXISTS "supplementStatus" VARCHAR(60) DEFAULT 'Draft',
+    ADD COLUMN IF NOT EXISTS "supplementCodeItemsJson" JSONB,
+    ADD COLUMN IF NOT EXISTS "supplementTradesCount" INTEGER DEFAULT 1,
+    ADD COLUMN IF NOT EXISTS "supplementOpApplied" BOOLEAN DEFAULT false,
+    ADD COLUMN IF NOT EXISTS "supplementCodeSubtotal" NUMERIC(12,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS "supplementOpAmount" NUMERIC(12,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS "supplementRequestedAmount" NUMERIC(12,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS "supplementApprovedAmount" NUMERIC(12,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS "supplementInitialRcv" NUMERIC(12,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS "supplementRevisedRcv" NUMERIC(12,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS "supplementRebuttalPacketUrl" TEXT,
+    ADD COLUMN IF NOT EXISTS "supplementSubmittedAt" TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS "supplementApprovedAt" TIMESTAMPTZ;
+
+-- ==============================================================================
+-- 21. POST-INSTALL LEAK SERVICE TICKET DISPATCHER & ANNUAL TUNE-UP MEMBERSHIP
+-- ==============================================================================
+ALTER TABLE "opportunity"
+    ADD COLUMN IF NOT EXISTS "maintenancePlanEnrolled" BOOLEAN DEFAULT false,
+    ADD COLUMN IF NOT EXISTS "maintenanceAnnualFee" NUMERIC(10,2) DEFAULT 299.00,
+    ADD COLUMN IF NOT EXISTS "maintenanceEnrolledAt" TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS "maintenanceNextTuneUpDate" DATE,
+    ADD COLUMN IF NOT EXISTS "serviceTicketId" VARCHAR(100),
+    ADD COLUMN IF NOT EXISTS "serviceTicketStatus" VARCHAR(60) DEFAULT 'None',
+    ADD COLUMN IF NOT EXISTS "serviceTicketCategory" VARCHAR(100),
+    ADD COLUMN IF NOT EXISTS "serviceTicketPriority" VARCHAR(40) DEFAULT 'Standard',
+    ADD COLUMN IF NOT EXISTS "serviceTicketAssignedTech" VARCHAR(150),
+    ADD COLUMN IF NOT EXISTS "serviceTicketWarrantyCovered" BOOLEAN DEFAULT true,
+    ADD COLUMN IF NOT EXISTS "serviceTicketCrewBackchargeAmount" NUMERIC(10,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS "serviceTicketSlaDeadline" TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS "serviceTicketResolvedAt" TIMESTAMPTZ;
+
 -- Trigger notification confirmation
 SELECT 'Roofing schema, production routing, and real-time profitability triggers successfully compiled.' AS status;
 
